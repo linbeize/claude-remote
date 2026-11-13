@@ -1660,6 +1660,7 @@ function qqRender() {
       qqDo({ op: 'settings', mode: v }, '已保存');
     })));
     p.append(qqRow('模型', '默认模型；每个 QQ 会话也可以用 /model 单独切换', qqSelect([...$('modelSel').options].map((o) => [o.value, o.textContent]), qq.model, (v) => qqDo({ op: 'settings', model: v }, '已保存'))));
+    p.append(qqRow('流式输出（实验）', '私聊时回复边生成边显示，只在私聊有效。目前 QQ 显示不稳定，可能出现“此条消息不支持显示”或同一段话发两遍，默认关闭', qqSwitch(qq.streaming, (v) => qqDo({ op: 'settings', streaming: v }, '已保存'))));
     p.append(qqRow('Markdown 消息', '需要机器人在 QQ 开放平台申请到 Markdown 权限，没有权限时请保持关闭（会自动去掉 Markdown 记号）', qqSwitch(qq.markdown, (v) => qqDo({ op: 'settings', markdown: v }, '已保存'))));
     p.append(el('div', 'sec-title', 'QQ 里可用的命令'));
     const cmds = el('div', 'plist');

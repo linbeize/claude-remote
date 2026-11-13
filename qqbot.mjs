@@ -42,7 +42,7 @@ function defaults() {
   return {
     appId: '', appSecret: '', ownerOpenid: '', enabled: true,
     cwd: '', model: '', mode: 'bypassPermissions',
-    markdown: false,
+    markdown: false, streaming: false, // 流式默认关：QQ 客户端显示不稳定（会出现“不支持显示”或重复），官方 dsh 插件实际上也没在用
     c2cAllow: [], groupAllow: [],
     peers: {},       // chatId -> { sessionId, model }
   };
@@ -79,6 +79,20 @@ async function startBot() {
   b.on('ready', () => { if (bot === b) { setStatus('ready'); console.log('[qqbot] 已连接'); } });
   b.on('resumed', () => { if (bot === b) setStatus('ready'); });
   b.on('disconnected', ({ willReconnect }) => { if (bot === b) setStatus(willReconnect ? 'connecting' : 'error', willReconnect ? null : '连接被 QQ 关闭'); });
+  // SDK 在“取网关地址时 token 已失效”这种情况下不会自己刷新 token，会拿着失效的 token 一直重试。
+  // 碰到 token 相关的错误就清掉缓存，下次重连会重新取 token
+  let tokenErrors = 0;
+  b.on('error', (err) => {
+    if (bot !== b) return;
+    const m = String(err?.message || err);
+    if (/access\s*_?token|token.*(无效|过期|invalid|expired)/i.test(m)) {
+      tokenErrors++;
+      try { b.tokenManager?.clearCache(cfg.appId); } catch { /* ignore */ }
+      if (tokenErrors === 1 || tokenErrors % 10 === 0) console.warn(`[qqbot] token 失效，已清除缓存，重连时重新获取（第 ${tokenErrors} 次）`);
+      setStatus('connecting', 'token 失效，正在重新获取');
+    }
+  });
+  b.on('ready', () => { tokenErrors = 0; });
   b.on('message', (ctx, msg) => { onMessage(b, msg).catch((e) => console.error('[qqbot] 处理消息出错：', e)); });
   setStatus('connecting');
   b.start(ac.signal).then(() => {
@@ -163,7 +177,7 @@ async function onMessage(b, msg) {
   const files = await saveAttachments(msg).catch((e) => { console.error('[qqbot] 下载附件失败：', e.message); return []; });
   if (files.length) prompt = `${prompt}\n\n我通过 QQ 发了这些文件：\n${files.map((f) => '- ' + f).join('\n')}`.trim();
   if (!prompt) return;
-  const who = (msg.kind === 'group' ? `（来自 QQ 群，发送者 ${msg.senderName || String(msg.senderId || '').slice(0, 8)}` : '（来自 QQ 私聊') + `。要把图片或文件发给对方，用 ${SEND_TOOL} 工具）`;
+  const who = (msg.kind === 'group' ? `（来自 QQ 群，发送者 ${msg.senderName || String(msg.senderId || '').slice(0, 8)}` : '（来自 QQ 私聊') + `。用对方使用的语言回复；要把图片或文件发给对方，用 ${SEND_TOOL} 工具）`;
 
   c.fromQQ = true; c.texts = [];
   try {
@@ -370,55 +384,128 @@ function toolLabel(name, input = {}) {
   const what = input.command || input.file_path || input.url || input.query || input.description || '';
   return `${map[name] || '调用工具 ' + name}${what ? '：' + String(what).slice(0, 300) : ''}`;
 }
+// ---------- 私聊流式输出 ----------
+// 做法参考 dsh-qqbot：QQ 只在私聊开放 stream_messages，而且内容要“只往后追加”——
+// 每一帧都是上一帧加上新文字。中途改写或删掉内容，QQ 会显示“此条消息不支持显示”。
+// 所以：Claude 每说一段话（两次工具调用之间的文字）就单独开一条流式消息，只追加文字，这段说完就关掉；
+// 调用工具期间不开流式，用“正在输入”提示。没能流式发出的最终回答，最后用普通消息补发，保证一定送到。
+const STREAM_MAX = 3800;                 // 一条流式消息最多放多少字，超出部分说完后用普通消息续发
+const STREAM_THROTTLE = 300;             // QQ 要求最快 300ms 一帧
+const STREAM_OPEN_WINDOW = 4.5 * 60_000; // 流式必须挂在 5 分钟内的消息下面
+class Segment {
+  constructor(b, c) {
+    this.b = b; this.c = c;
+    this.session = null; this.text = ''; this.sent = 0; this.failed = false; this.done = false;
+    this.chain = Promise.resolve(); this.timer = null;
+  }
+  append(t) {
+    if (this.done) return;
+    this.text += t;
+    if (!this.timer && !this.failed) this.timer = setTimeout(() => { this.timer = null; this.enqueue(this.text.slice(0, STREAM_MAX)); }, STREAM_THROTTLE);
+  }
+  enqueue(frame) { this.chain = this.chain.then(() => this.send(frame)); return this.chain; }
+  async send(frame) {
+    if (this.failed || !frame.trim()) return false;
+    if (!this.session) {
+      try { this.session = this.b.openStream({ target: this.c.target, throttleMs: STREAM_THROTTLE }); this.c.passiveCount++; }
+      catch (e) { this.failed = true; console.warn('[qqbot] 开启流式消息失败，改用普通消息：' + (e?.message || e)); return false; }
+    }
+    try { await this.session.update(frame); this.sent++; return true; }
+    catch (e) { console.warn('[qqbot] 流式更新失败：' + (e?.message || e)); return false; }
+  }
+  // 这段话说完：用完整文字发最后一帧并关闭。返回是否成功送到（成功的话超出 STREAM_MAX 的部分已用普通消息续发）
+  async finish(fullText, extra = '') {
+    clearTimeout(this.timer); this.timer = null;
+    if (this.done) return false;
+    this.done = true;
+    const text = (fullText ?? this.text) + extra;
+    let ok = false;
+    if (this.sent > 0 && !this.failed) ok = await this.enqueue(text.slice(0, STREAM_MAX));
+    else await this.chain;
+    if (this.session) { try { await this.session.complete(); } catch (e) { console.warn('[qqbot] 结束流式消息失败：' + (e?.message || e)); } }
+    if (ok && text.length > STREAM_MAX) await replyChat(this.c.chatId, text.slice(STREAM_MAX));
+    return ok;
+  }
+}
+// 还能不能再开一条流式消息：开关打开、私聊、挂靠的消息还在 5 分钟内、被动回复次数还留一次给最终回答
+function canStream(c) {
+  return cfg.streaming === true && bot && c.target?.scope === 'c2c' && c.target.msgId
+    && Date.now() - c.inboundAt < STREAM_OPEN_WINDOW && c.passiveCount < PASSIVE_MAX - 1;
+}
+// 同一个 QQ 会话的发送按顺序排队，保证先说的先到
+function queue(c, fn) { c.out = (c.out || Promise.resolve()).then(fn).catch((e) => console.error('[qqbot] 发送出错：', e)); return c.out; }
+
 function onRunEvent(ev) {
   const chatId = ev.chatId;
   if (!String(chatId).startsWith('qq:')) return;
   const c = chats.get(chatId);
   if (!c) return;
+  c.chatId = chatId;
   switch (ev.type) {
     case 'run_start':
       // 网页上接着聊这个会话时不推到 QQ；QQ 发起的和撞限额后的自动继续才推
       if (ev.auto) { c.fromQQ = true; c.texts = []; }
+      c.seg = null; c.delivered = new Set(); c.anyDelivered = false;
       if (c.fromQQ && c.target?.scope === 'c2c' && bot) {
         const b = bot;
-        const typing = () => { if (Date.now() - c.inboundAt < 5 * 60_000) b.sendTyping(c.target, 30).catch(() => {}); };
+        // 没在流式输出时显示“正在输入”
+        const typing = () => { if (!c.seg && Date.now() - c.inboundAt < 5 * 60_000) b.sendTyping(c.target, 30).catch(() => {}); };
         typing();
         clearInterval(c.typingTimer);
         c.typingTimer = setInterval(typing, 25_000);
       }
       break;
+    case 'delta':
+      if (!c.fromQQ || !ev.text) break;
+      if (!c.seg && canStream(c)) c.seg = new Segment(bot, c);
+      c.seg?.append(ev.text);
+      break;
     case 'session':
       if (ev.sessionId) { const p = cfg.peers[chatId] || (cfg.peers[chatId] = {}); if (p.sessionId !== ev.sessionId) { p.sessionId = ev.sessionId; save(); } }
       break;
-    case 'message':
+    case 'message': {
       if (!c.fromQQ || ev.role !== 'assistant' || !Array.isArray(ev.content)) break;
+      const said = ev.content.filter((b) => b.type === 'text' && b.text?.trim()).map((b) => b.text).join('\n\n');
       for (const blk of ev.content) {
         if (blk.type === 'text' && blk.text?.trim()) c.texts.push(blk.text);
         if (blk.type === 'tool_use') c.texts = []; // 只保留最后一次调用工具之后的文字，也就是最终回答
       }
+      // 这段话说完了：把流式消息收尾。最后一帧用流式累积的文字，保证跟之前的帧是“只追加”的关系
+      const seg = c.seg; c.seg = null;
+      if (seg) queue(c, async () => { if (await seg.finish()) { c.delivered.add(said || seg.text); c.anyDelivered = true; } });
       break;
+    }
     case 'permission_request':
       if (!c.fromQQ) break;
       c.pendingPerm = ev.id;
-      replyChat(chatId, `Claude 想要${toolLabel(ev.toolName, ev.input)}\n\n回复“允许”“总是允许”或“拒绝”。`);
+      queue(c, () => replyChat(chatId, `Claude 想要${toolLabel(ev.toolName, ev.input)}\n\n回复“允许”“总是允许”或“拒绝”。`));
       break;
     case 'permission_resolved':
       if (c.pendingPerm === ev.id) c.pendingPerm = null;
       break;
     case 'error':
-      if (c.fromQQ) replyChat(chatId, '出错了：' + ev.message);
+      if (c.fromQQ) queue(c, () => replyChat(chatId, '出错了：' + ev.message));
       break;
     case 'run_end': {
       clearInterval(c.typingTimer); c.typingTimer = null;
       c.pendingPerm = null;
       if (!c.fromQQ) break;
       c.fromQQ = false;
-      const answer = c.texts.join('\n\n').trim();
-      c.texts = [];
-      if (ev.aborted) break;
-      if (answer) replyChat(chatId, answer);
-      else if (!ev.rateLimited) replyChat(chatId, '（已完成，没有文字回复）');
-      if (ev.rateLimited) replyChat(chatId, '撞到了 Claude 的用量限额，额度恢复后会自动继续，完成后把结果发给你。');
+      const finals = c.texts.slice(); c.texts = [];
+      const seg = c.seg; c.seg = null;
+      const limitNote = '撞到了 Claude 的用量限额，额度恢复后会自动继续，完成后把结果发给你。';
+      queue(c, async () => {
+        if (ev.aborted) {
+          if (seg && await seg.finish(seg.text, '\n\n（已停止）')) return;
+          return;
+        }
+        if (seg && await seg.finish()) { c.delivered.add(seg.text); c.anyDelivered = true; }
+        // 最终回答里没能流式送到的部分，用普通消息补发
+        const missing = finals.filter((t) => ![...c.delivered].some((d) => d.includes(t.trim())));
+        if (missing.length) await replyChat(chatId, missing.join('\n\n'));
+        else if (!finals.length && !c.anyDelivered && !ev.rateLimited) await replyChat(chatId, '（已完成，没有文字回复）');
+        if (ev.rateLimited) await replyChat(chatId, limitNote);
+      });
       break;
     }
   }
@@ -466,7 +553,7 @@ export function getQQStatus() {
     bound: bound(), enabled: cfg.enabled, appId: cfg.appId ? cfg.appId : null,
     state: status.state, error: status.error,
     owner: cfg.ownerOpenid ? { id: cfg.ownerOpenid.slice(0, 8), openid: cfg.ownerOpenid } : null,
-    cwd: workdir(), model: cfg.model || '', mode: cfg.mode, markdown: Boolean(cfg.markdown),
+    cwd: workdir(), model: cfg.model || '', mode: cfg.mode, markdown: Boolean(cfg.markdown), streaming: cfg.streaming === true,
     c2cAllow: cfg.c2cAllow.map((u) => ({ id: u.openid.slice(0, 8), openid: u.openid, name: u.name, addedAt: u.addedAt })),
     groupAllow: cfg.groupAllow.map((g) => ({ id: g.openid.slice(0, 8), openid: g.openid, addedAt: g.addedAt })),
     pair: pair && Date.now() < pair.expiresAt ? { code: pair.code, expiresAt: pair.expiresAt } : null,
@@ -519,6 +606,7 @@ export async function qqAction(body) {
         if (!host.MODES.includes(String(body.mode))) throw new Error('不支持的权限模式');
         cfg.mode = String(body.mode);
       }
+      if (body.streaming !== undefined) cfg.streaming = Boolean(body.streaming);
       if (body.markdown !== undefined) {
         cfg.markdown = Boolean(body.markdown);
         save();
@@ -564,6 +652,7 @@ export const __test = {
   setPair(code) { pair = { code, expiresAt: Date.now() + PAIR_TTL }; },
   sendFileToChat,
   setHost(h) { host = h; },
+  setCfg(c) { cfg = c; },
   cfg: () => cfg,
   chats,
 };
