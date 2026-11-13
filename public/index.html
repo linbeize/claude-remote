@@ -104,12 +104,25 @@ code, pre, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospa
 /* Token 统计窗口 */
 .modal { position: fixed; inset: 0; z-index: 30; background: rgba(15, 18, 25, .4); display: flex; align-items: center; justify-content: center; padding: 28px; }
 .modal[hidden] { display: none; }
-/* 外框负责圆角并裁掉溢出，里面的 .sp 负责滚动，这样滚动条不会把右侧圆角顶成直角 */
-.mbox { position: relative; width: min(1040px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
-.mclose { position: absolute; top: 14px; right: 14px; z-index: 1; }
-.sp { padding: 20px 24px 28px; flex: 1; min-height: 0; overflow-y: auto; }
-.sphead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding-right: 40px; }
-.sphead h2 { margin: 0; font-size: 20px; flex: 1; }
+/* 设置窗口式布局：标题栏 + 左侧分类 + 右侧内容。外框负责圆角并裁掉溢出，右侧 .sp 单独滚动 */
+.mbox { position: relative; width: min(1100px, 100%); height: min(780px, 100%); display: flex; flex-direction: column; overflow: hidden; background: var(--bg); border-radius: 28px; box-shadow: 0 24px 70px rgba(0,0,0,.22); }
+.mhead { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 12px 40px; flex-shrink: 0; }
+.mhead h2 { margin: 0; font-size: 22px; font-weight: 650; }
+.mclose { width: 36px; height: 36px; }
+.mclose .i { width: 20px; height: 20px; }
+.mbody { flex: 1; min-height: 0; display: flex; gap: 28px; padding: 0 0 0 24px; }
+.mnav { width: 230px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 8px 0 24px; overflow-y: auto; }
+.mnav button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border-radius: 14px; font-size: 15px; color: var(--text); text-align: left; }
+.mnav button .i { width: 19px; height: 19px; color: var(--text2); }
+.mnav button:hover { background: var(--hover); }
+.mnav button.on { background: var(--active); font-weight: 600; }
+.sp { padding: 4px 32px 32px 4px; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
+/* 设置项式的一行：左边标题和说明，右边控件 */
+.srow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0 18px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
+.srow .st1 { font-size: 15.5px; }
+.srow .st2 { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.sec-title { font-size: 15.5px; margin: 4px 0 12px; }
+.sec-title .sub { color: var(--muted); font-size: 13px; margin-left: 8px; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .seg button { padding: 6px 14px; font-size: 13.5px; color: var(--text2); border-right: 1px solid var(--border); }
 .seg button:last-child { border-right: 0; }
@@ -142,8 +155,7 @@ table.st th:first-child, table.st td:first-child { text-align: left; white-space
 table.st tr:last-child td { border-bottom: 0; }
 table.st td.money { font-weight: 600; }
 .twrap { overflow-x: auto; }
-details.prices summary { cursor: pointer; color: var(--text2); font-size: 13.5px; }
-details.prices p { color: var(--muted); font-size: 12.5px; margin: 8px 0; }
+.prices p { color: var(--text2); font-size: 13px; line-height: 1.7; margin: 0 0 12px; }
 
 /* ---------- 主区域 ---------- */
 #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -315,8 +327,18 @@ body.tab-files #chat, body.tab-files #composer { display: none; }
   .flist .fs { display: none; }
   .flist .fa { opacity: 1; }
   .modal { padding: 0; }
-  .mbox { height: 100%; max-height: none; border-radius: 0; }
-  .sp { padding: 14px 12px 40px; }
+  .mbox { height: 100%; border-radius: 0; }
+  .mhead { padding: 14px 10px 6px 16px; }
+  .mhead h2 { font-size: 18px; }
+  /* 手机上左侧分类变成顶部可横向滑动的一排 */
+  .mbody { flex-direction: column; gap: 0; padding: 0; }
+  .mnav { width: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 4px 12px 10px; gap: 6px; flex-shrink: 0; scrollbar-width: none; }
+  .mnav button { width: auto; flex-shrink: 0; padding: 8px 14px; font-size: 14px; gap: 8px; border-radius: 999px; background: var(--hover); }
+  .mnav button .i { width: 16px; height: 16px; }
+  .mnav button.on { background: var(--accent-soft); color: var(--accent); }
+  .mnav button.on .i { color: var(--accent); }
+  .sp { padding: 4px 12px 40px; }
+  .srow { padding: 8px 0 14px; margin-bottom: 14px; }
   .kpis { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .kpi .kv { font-size: 19px; }
   .chart, .xlab { margin-left: 40px; }
@@ -433,9 +455,12 @@ body.tab-files #chat, body.tab-files #composer { display: none; }
 </div>
 <div id="toast"></div>
 <div class="modal" id="statsModal" hidden>
-  <div class="mbox" role="dialog" aria-modal="true" aria-label="Token 统计">
-    <button class="iconbtn mclose" id="statsClose" title="关闭（Esc）" data-i="x"></button>
-    <div class="sp" id="sp"></div>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+    <div class="mhead"><h2 id="statsTitle">Token 统计</h2><button class="iconbtn mclose" id="statsClose" title="关闭（Esc）" data-i="x"></button></div>
+    <div class="mbody">
+      <nav class="mnav" id="statsNav"></nav>
+      <div class="sp" id="sp"></div>
+    </div>
   </div>
 </div>
 
@@ -482,6 +507,8 @@ const ICONS = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  layout: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  tag: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><path d="M8 8h.01"/>',
 };
 const svg = (name) => `<svg class="i" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
 function hydrateIcons(root = document) { for (const e of root.querySelectorAll('[data-i]')) { e.insertAdjacentHTML('afterbegin', svg(e.dataset.i)); e.removeAttribute('data-i'); } }
@@ -1312,20 +1339,58 @@ async function loadUsageStats() {
     sp.replaceChildren(el('div', 'ferr', '统计失败：' + err.message));
   }
 }
-function renderUsagePage(d) {
-  const sp = $('sp'); sp.replaceChildren();
-  const T = d.total;
-  // 标题 + 时间范围
-  const head = el('div', 'sphead'); head.append(el('h2', null, 'Token 统计'));
-  const seg = el('div', 'seg');
-  for (const [v, label] of [[1, '今天'], [7, '7 天'], [30, '30 天'], [90, '90 天'], [0, '全部']]) {
-    const b = el('button', v === statsDays ? 'on' : '', label);
-    b.onclick = () => { statsDays = v; store.set('statsDays', v); loadUsageStats(); };
-    seg.append(b);
+// 左侧分类，跟设置窗口一样一次只看一类
+const STATS_SECTIONS = [
+  ['overview', 'layout', '概览'],
+  ['daily', 'chart', '每日费用'],
+  ['models', 'cpu', '按模型'],
+  ['projects', 'folder', '按项目'],
+  ['prices', 'tag', '价格说明'],
+];
+let statsSection = store.get('statsSection', 'overview');
+if (!STATS_SECTIONS.some(([k]) => k === statsSection)) statsSection = 'overview';
+let statsData = null;
+function renderStatsNav() {
+  const nav = $('statsNav'); nav.replaceChildren();
+  for (const [key, ic, label] of STATS_SECTIONS) {
+    const b = el('button', key === statsSection ? 'on' : '');
+    b.append(icon(ic), el('span', null, label));
+    b.onclick = () => {
+      statsSection = key; store.set('statsSection', key);
+      renderStatsNav();
+      if (statsData) renderUsagePage(statsData);
+      $('sp').scrollTop = 0;
+    };
+    nav.append(b);
   }
-  head.append(seg);
-  sp.append(head);
-  // 指标卡
+}
+renderStatsNav();
+function renderUsagePage(d) {
+  statsData = d;
+  const sp = $('sp'); sp.replaceChildren();
+  const tip = $('tip'); if (tip) tip.style.display = 'none';
+  const T = d.total;
+  const sec = statsSection;
+  // 时间范围：做成设置项的样子，放在内容最上面（价格说明不需要）
+  if (sec !== 'prices') {
+    const row = el('div', 'srow');
+    const l = el('div'); l.append(el('div', 'st1', '时间范围'), el('div', 'st2', '统计这台电脑上所有 Claude Code 会话的用量'));
+    const seg = el('div', 'seg');
+    for (const [v, label] of [[1, '今天'], [7, '7 天'], [30, '30 天'], [90, '90 天'], [0, '全部']]) {
+      const b = el('button', v === statsDays ? 'on' : '', label);
+      b.onclick = () => { statsDays = v; store.set('statsDays', v); loadUsageStats(); };
+      seg.append(b);
+    }
+    row.append(l, seg);
+    sp.append(row);
+  }
+  if (sec === 'overview') renderStatsOverview(sp, T);
+  else if (sec === 'daily') renderStatsDaily(sp, d);
+  else if (sec === 'models') renderStatsTable(sp, '按模型', d.byModel, '模型', (r) => r.model);
+  else if (sec === 'projects') renderStatsTable(sp, '按项目', d.byProject, '项目目录', (r) => r.project);
+  else renderStatsPrices(sp, d);
+}
+function renderStatsOverview(sp, T) {
   const inAll = T.input + T.cacheRead + T.cacheWrite;
   const kpis = el('div', 'kpis');
   const kpi = (label, value, sub, hero) => { const k = el('div', 'kpi' + (hero ? ' hero' : '')); k.append(el('div', 'kl', label), el('div', 'kv', value)); if (sub) k.append(el('div', 'ks', sub)); kpis.append(k); };
@@ -1338,11 +1403,18 @@ function renderUsagePage(d) {
   kpi('缓存写入', fmtTok(T.cacheWrite));
   kpi('平均每次请求', T.requests ? fmtUsd(T.cost / T.requests) : '—', T.requests ? `${fmtTok((inAll + T.output) / T.requests)} token` : '');
   sp.append(kpis);
+}
+function renderStatsDaily(sp, d) {
   // 每日费用柱状图（单一系列，悬停看明细）
-  if (d.byDay.length > 1) {
+  const h = el('div', 'sec-title', '每日折算费用'); h.append(el('span', 'sub', '悬停查看当天明细'));
+  sp.append(h);
+  if (d.byDay.length <= 1) {
+    sp.append(el('div', 'unote', d.byDay.length ? '只有一天的数据，选一个更长的时间范围就能看到趋势' : '这段时间没有记录'));
+    if (d.byDay.length) { const x = d.byDay[0]; sp.append(el('div', 'unote', `${x.day}：${fmtUsd(x.cost)}，${x.requests} 次请求`)); }
+    return;
+  }
+  {
     const card = el('div', 'card');
-    const h = el('h3', null, '每日折算费用'); h.append(el('span', 'sub', '悬停查看当天明细'));
-    card.append(h);
     const max = Math.max(...d.byDay.map((x) => x.cost), 0.01);
     const step = niceStep(max);
     const top = Math.ceil(max / step) * step;
@@ -1373,9 +1445,12 @@ function renderUsagePage(d) {
     card.append(chart, xl);
     sp.append(card);
   }
-  // 按模型 / 按项目
-  const table = (title, rows, keyName, keyFn) => {
-    const card = el('div', 'card'); card.append(el('h3', null, title));
+}
+// 按模型 / 按项目
+function renderStatsTable(sp, title, rows, keyName, keyFn) {
+  {
+    sp.append(el('div', 'sec-title', title));
+    const card = el('div', 'card');
     if (!rows.length) { card.append(el('div', 'unote', '这段时间没有记录')); sp.append(card); return; }
     const w = el('div', 'twrap'); const t = el('table', 'st');
     const hr = el('tr'); for (const x of [keyName, '请求', '输入', '输出', '缓存读取', '缓存写入', '折算费用']) hr.append(el('th', null, x));
@@ -1387,12 +1462,12 @@ function renderUsagePage(d) {
       t.append(tr);
     }
     w.append(t); card.append(w); sp.append(card);
-  };
-  table('按模型', d.byModel, '模型', (r) => r.model);
-  table('按项目', d.byProject, '项目目录', (r) => r.project);
-  // 价格说明
-  const det = el('details', 'prices card');
-  det.append(el('summary', null, '价格表和折算说明'));
+  }
+}
+// 价格说明
+function renderStatsPrices(sp, d) {
+  sp.append(el('div', 'sec-title', '价格表和折算说明'));
+  const det = el('div', 'prices card');
   det.append(el('p', null, '统计来自这台电脑上所有 Claude Code 会话记录（~/.claude/projects），包括桌面版、命令行和本网页发起的会话，以及子智能体。费用按 Anthropic API 公开价格折算（美元 / 百万 token），用来对比用量。用订阅登录时实际不按这个收费。缓存写入：5 分钟缓存按输入价 1.25 倍，1 小时缓存按 2 倍；快速模式按 2 倍；Haiku 5.5 超过 10 万 token 的长提示价格没有单独区分。价格可以在 data/pricing.json 里覆盖。'));
   const w = el('div', 'twrap'); const t = el('table', 'st');
   const hr = el('tr'); for (const x of ['模型', '输入', '输出', '缓存读取', '缓存写入 5m', '缓存写入 1h']) hr.append(el('th', null, x));
