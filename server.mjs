@@ -11,6 +11,7 @@ import { query, listSessions, getSessionMessages } from '@anthropic-ai/claude-ag
 import { loadAuth, attemptLogin, createSession, checkSession, destroySession, SESSION_TTL_MS } from './auth.mjs';
 import { loadCert, needsRenewal, issueCert, handleChallenge, loadAccount } from './tls.mjs';
 import { getLimits, getStats, invalidateLimits } from './usage.mjs';
+import { initQQBot, getQQStatus, qqAction, stopQQBot, qqRunOptions } from './qqbot.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -167,6 +168,19 @@ async function handle(req, res) {
       }
       const days = Math.max(0, Math.min(3650, Number(url.searchParams.get('days') ?? 30) || 0));
       return json(res, 200, await getStats(days));
+    }
+    // ---------- QQ 机器人设置 ----------
+    if (url.pathname === '/api/qqbot') {
+      if (!isAuthed(req)) return json(res, 401, { error: '请先登录' });
+      if (req.method === 'GET') return json(res, 200, getQQStatus());
+      if (req.method === 'POST') {
+        if (!sameOrigin(req) || !String(req.headers['content-type']).startsWith('application/json')) return json(res, 403, { error: '请求来源不对' });
+        let body;
+        try { body = JSON.parse(await readBody(req, 8192)); } catch { return json(res, 400, { error: '请求格式不对' }); }
+        try { return json(res, 200, await qqAction(body || {})); }
+        catch (err) { return json(res, 400, { error: String(err?.message || err) }); }
+      }
+      return json(res, 405, { error: '不支持的请求' });
     }
     // ---------- 文件：列目录 / 下载 / 上传（都要求已登录，且只能访问工作区里的路径） ----------
     if (['/api/files', '/api/download', '/api/upload', '/api/fs', '/api/preview', '/api/raw'].includes(url.pathname)) {
@@ -373,10 +387,12 @@ function broadcast(msg) {
 const runs = new Map();
 let permSeq = 0;
 
+const runListeners = new Set(); // 服务端内部订阅对话事件（QQ 机器人用）
 function emit(run, chatId, msg) {
   const m = { ...msg, chatId };
   run.buffer.push(m);
   broadcast(m);
+  for (const l of runListeners) { try { l(m); } catch (e) { console.error('[run listener]', e); } }
 }
 
 // 把 SDK 消息精简成前端要的样子（只保留主对话，不含子 agent 内部细节）
@@ -572,7 +588,7 @@ function fireResume(chatId) {
 }
 try { for (const r of JSON.parse(fs.readFileSync(RESUME_FILE, 'utf8'))) { resumes.set(r.chatId, r); armResume(r); } } catch { /* 没有就算了 */ }
 
-async function startRun(chatId, { sessionId, text, cwd, model, mode, auto }) {
+async function startRun(chatId, { sessionId, text, cwd, model, mode, auto, origin }) {
   if (runs.has(chatId)) throw new Error('这个对话还在运行中');
   cwd = path.resolve(cwd || WORKDIR);
   if (!workspaces.has(cwd) || !isDir(cwd)) throw new Error('工作区不存在：' + cwd);
@@ -603,10 +619,13 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto }) {
     });
   });
 
+  // QQ 发起的对话（和它撞限额后的自动继续）多一个“发文件到 QQ”的工具；网页上接着聊 QQ 会话时没有
+  const extra = (origin === 'qq' || auto) ? qqRunOptions(chatId) : null;
   try {
     const q = query({
       prompt: text,
       options: {
+        ...(extra || {}),
         cwd,
         resume: sessionId || undefined,
         model: model || MODEL,
@@ -624,11 +643,11 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto }) {
     if (!abort.signal.aborted) emit(run, chatId, { type: 'error', message: String(err?.message || err) });
   } finally {
     for (const p of run.pending.values()) p.done({ behavior: 'deny', message: '已结束' }, '已结束');
-    emit(run, chatId, { type: 'run_end', sessionId: run.sessionId, aborted: abort.signal.aborted });
-    runs.delete(chatId);
-    invalidateLimits(); // 跑完一轮后限额会变，下次读取时重新拉
     // 测试用：设置 CR_SIMULATE_LIMIT_SECONDS 时，把普通的一轮当成撞到限额（自动继续的那轮除外）
     if (SIMULATE_LIMIT && !run.rateLimited && !run.auto && !abort.signal.aborted) run.rateLimited = { simulateMs: SIMULATE_LIMIT * 1000 };
+    emit(run, chatId, { type: 'run_end', sessionId: run.sessionId, aborted: abort.signal.aborted, rateLimited: Boolean(run.rateLimited && !abort.signal.aborted) });
+    runs.delete(chatId);
+    invalidateLimits(); // 跑完一轮后限额会变，下次读取时重新拉
     if (run.rateLimited && !abort.signal.aborted) {
       scheduleResume(chatId, run).catch((e) => console.error('[resume] 安排自动继续失败：' + e.message));
     } else if (!run.rateLimited) {
@@ -636,6 +655,26 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto }) {
     }
   }
 }
+
+function resolvePermission(chatId, id, decision, message) {
+  const p = runs.get(chatId)?.pending.get(String(id));
+  if (!p) return false;
+  if (decision === 'allow') p.done({ behavior: 'allow' }, '已允许');
+  else if (decision === 'always') p.done({ behavior: 'allow', updatedPermissions: p.suggestions }, '已允许（以后总是允许）');
+  else p.done({ behavior: 'deny', message: message || '用户拒绝了这次操作' }, '已拒绝');
+  return true;
+}
+
+// QQ 机器人：复用同一套对话运行逻辑，QQ 上的会话在网页里也能看到、接着聊
+initQQBot({
+  WORKDIR, workspaces, MODELS, MODES,
+  startRun: (chatId, opts) => { cancelResume(chatId, 'manual'); resumeAttempts.delete(chatId); return startRun(chatId, opts); },
+  isRunning: (chatId) => runs.has(chatId),
+  interrupt: (chatId) => runs.get(chatId)?.abort.abort(),
+  resolvePermission,
+  onRunEvent: (fn) => runListeners.add(fn),
+});
+for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { stopQQBot(); process.exit(0); });
 
 // 服务端也定时 ping，清掉已经断了但没正常关闭的连接（手机断网等）
 setInterval(() => {
@@ -720,12 +759,7 @@ wss.on('connection', (ws) => {
           break;
         }
         case 'permission': {
-          const run = runs.get(msg.chatId);
-          const p = run?.pending.get(String(msg.id));
-          if (!p) return;
-          if (msg.decision === 'allow') p.done({ behavior: 'allow' }, '已允许');
-          else if (msg.decision === 'always') p.done({ behavior: 'allow', updatedPermissions: p.suggestions }, '已允许（以后总是允许）');
-          else p.done({ behavior: 'deny', message: msg.message || '用户拒绝了这次操作' }, '已拒绝');
+          resolvePermission(msg.chatId, msg.id, msg.decision, msg.message);
           break;
         }
       }

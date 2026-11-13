@@ -121,6 +121,36 @@ code, pre, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospa
 .srow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0 18px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
 .srow .st1 { font-size: 15.5px; }
 .srow .st2 { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.srow.plain { border-bottom: 1px solid var(--border); }
+.srow .ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* QQ 机器人设置 */
+.qdot { width: 7px; height: 7px; border-radius: 50%; background: transparent; margin-left: -2px; }
+.qdot.ready { background: #22a06b; }
+.qdot.warn { background: #e2a03f; }
+.qdot.bad { background: #d9534f; }
+.sel { height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--hover); color: var(--text); font-size: 14px; max-width: 320px; }
+.inp { height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px; width: 260px; max-width: 100%; }
+.btn.danger { color: #d9534f; }
+.btn.danger:hover { border-color: #d9534f; }
+.sw { position: relative; width: 46px; height: 26px; border-radius: 13px; background: var(--border); transition: background .15s; flex-shrink: 0; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
+.sw.on { background: var(--text); }
+.sw.on::after { left: 23px; }
+.qstate { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+.qstate .qdot { width: 9px; height: 9px; margin: 0; background: var(--muted); }
+.qr { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; padding: 18px; border: 1px solid var(--border); border-radius: 18px; background: var(--panel); margin-bottom: 18px; }
+.qr .qimg { width: 200px; height: 200px; border-radius: 12px; background: #fff; padding: 8px; display: flex; align-items: center; justify-content: center; }
+.qr .qimg svg { width: 100%; height: 100%; }
+.qr .qtxt { flex: 1; min-width: 200px; color: var(--text2); font-size: 14px; line-height: 1.8; }
+.qr .qtxt b { color: var(--text); font-size: 16px; }
+.plist { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-bottom: 18px; }
+.plist .pi { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.plist .pi:last-child { border-bottom: 0; }
+.plist .pi .grow { flex: 1; min-width: 0; }
+.plist .pi .sub { color: var(--muted); font-size: 12.5px; }
+.plist .tagown { font-size: 12px; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+.pcode { font-size: 30px; font-weight: 700; letter-spacing: 6px; font-variant-numeric: tabular-nums; }
+.qwarn { border-radius: 14px; background: var(--accent-soft); color: var(--text2); padding: 12px 16px; font-size: 13.5px; line-height: 1.7; margin-bottom: 18px; }
 .sec-title { font-size: 15.5px; margin: 4px 0 12px; }
 .sec-title .sub { color: var(--muted); font-size: 13px; margin-left: 8px; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -379,6 +409,7 @@ body.tab-files #chat, body.tab-files #composer { display: none; }
       <div id="ulimits"><div class="unote">读取中…</div></div>
       <div class="ufoot">
         <button class="ubtn" id="statsBtn"><span data-i="chart"></span>Token 统计</button>
+        <button class="ubtn" id="qqBtn" title="QQ 机器人"><span data-i="bot"></span>QQ<span class="qdot" id="qqDot"></span></button>
         <div class="grow"></div>
         <button class="iconbtn" id="logoutBtn" data-i="logout"></button>
       </div>
@@ -454,6 +485,15 @@ body.tab-files #chat, body.tab-files #composer { display: none; }
   </section>
 </div>
 <div id="toast"></div>
+<div class="modal" id="qqModal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="qqTitle">
+    <div class="mhead"><h2 id="qqTitle">QQ 机器人</h2><button class="iconbtn mclose" id="qqClose" title="关闭（Esc）" data-i="x"></button></div>
+    <div class="mbody">
+      <nav class="mnav" id="qqNav"></nav>
+      <div class="sp" id="qqPane"></div>
+    </div>
+  </div>
+</div>
 <div class="modal" id="statsModal" hidden>
   <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
     <div class="mhead"><h2 id="statsTitle">Token 统计</h2><button class="iconbtn mclose" id="statsClose" title="关闭（Esc）" data-i="x"></button></div>
@@ -507,6 +547,7 @@ const ICONS = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   layout: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   tag: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><path d="M8 8h.01"/>',
 };
@@ -1482,6 +1523,153 @@ function niceStep(max) {
   for (const f of [1, 2, 2.5, 5, 10]) if (raw <= f * mag) return f * mag;
   return 10 * mag;
 }
+// ================= QQ 机器人设置 =================
+const QQ_SECTIONS = [['conn', 'bot', '连接'], ['access', 'shield', '访问权限'], ['chat', 'gear', '对话设置']];
+const QQ_STATE = { unbound: ['未绑定', ''], disabled: ['已停用', 'warn'], connecting: ['连接中…', 'warn'], ready: ['已连接', 'ready'], stopped: ['已断开', 'bad'], error: ['连接出错', 'bad'] };
+let qq = null, qqSection = store.get('qqSection', 'conn'), qqPoll = null, qqManual = false;
+const qqOpen = () => !$('qqModal').hidden;
+let qqSig = '';
+async function qqLoad() {
+  try { const r = await fetch('/api/qqbot'); if (r.ok) qq = await r.json(); } catch { /* 下次再试 */ }
+  qqRenderDot();
+  // 轮询时内容没变就不重画，免得二维码闪、正在填的输入框被清掉
+  const sig = JSON.stringify({ ...qq, serverNow: 0, pair: qq?.pair && { ...qq.pair, m: Math.round((qq.pair.expiresAt - qq.serverNow) / 60000) } });
+  if (qqOpen() && sig !== qqSig) { qqSig = sig; qqRender(); }
+}
+async function qqDo(body, okMsg) {
+  try {
+    const r = await fetch('/api/qqbot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '操作失败');
+    qq = d; qqRenderDot(); qqRender();
+    if (okMsg) toast(okMsg);
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+function qqRenderDot() {
+  const d = $('qqDot'); d.className = 'qdot ' + (qq ? (QQ_STATE[qq.state]?.[1] || '') : '');
+  $('qqBtn').title = 'QQ 机器人：' + (qq ? QQ_STATE[qq.state]?.[0] || qq.state : '读取中');
+}
+function openQQ() { $('qqModal').hidden = false; $('qqBtn').classList.add('on'); $('app').classList.remove('side-open'); qqRender(); qqLoad(); clearInterval(qqPoll); qqPoll = setInterval(() => { if (qq?.bind || qq?.state === 'connecting' || qq?.pair) qqLoad(); }, 2000); }
+function closeQQ() { $('qqModal').hidden = true; $('qqBtn').classList.remove('on'); clearInterval(qqPoll); qqPoll = null; if (qq?.bind && qq.bind.state !== 'done') qqDo({ op: 'bind_cancel' }); }
+$('qqBtn').onclick = () => (qqOpen() ? closeQQ() : openQQ());
+$('qqClose').onclick = closeQQ;
+$('qqModal').addEventListener('mousedown', (e) => { if (e.target === $('qqModal')) closeQQ(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && qqOpen() && !($('lightbox') && !$('lightbox').hidden)) closeQQ(); });
+setInterval(() => { if (!qqOpen()) qqLoad(); }, 60_000);
+
+function qqRow(title, desc, ...ctl) {
+  const row = el('div', 'srow');
+  const l = el('div'); l.append(el('div', 'st1', title)); if (desc) l.append(el('div', 'st2', desc));
+  const c = el('div', 'ctl'); c.append(...ctl);
+  row.append(l, c);
+  return row;
+}
+function qqBtn(label, cls, onclick) { const b = el('button', 'btn' + (cls ? ' ' + cls : ''), label); b.onclick = onclick; return b; }
+function qqSwitch(on, onchange) { const s = el('button', 'sw' + (on ? ' on' : '')); s.setAttribute('role', 'switch'); s.setAttribute('aria-checked', String(on)); s.onclick = () => onchange(!on); return s; }
+function qqSelect(options, value, onchange) {
+  const s = el('select', 'sel');
+  for (const [v, label] of options) { const o = el('option', null, label); o.value = v; if (v === value) o.selected = true; s.append(o); }
+  s.onchange = () => onchange(s.value);
+  return s;
+}
+function renderQQNav() {
+  const nav = $('qqNav'); nav.replaceChildren();
+  for (const [key, ic, label] of QQ_SECTIONS) {
+    const b = el('button', key === qqSection ? 'on' : '');
+    b.append(icon(ic), el('span', null, label));
+    b.onclick = () => { qqSection = key; store.set('qqSection', key); renderQQNav(); qqRender(); $('qqPane').scrollTop = 0; };
+    nav.append(b);
+  }
+}
+function qqRender() {
+  renderQQNav();
+  const p = $('qqPane');
+  const keepScroll = p.scrollTop;
+  p.replaceChildren();
+  if (!qq) { p.append(el('div', 'unote', '读取中…')); return; }
+  const st = QQ_STATE[qq.state] || [qq.state, ''];
+  const stateEl = el('span', 'qstate'); const dot = el('span', 'qdot ' + st[1]); stateEl.append(dot, el('span', null, st[0]));
+
+  if (qqSection === 'conn') {
+    p.append(el('div', 'qwarn', '在 QQ 里给机器人发消息，就能和这台电脑上的 Claude 对话，QQ 上的会话也会出现在网页左侧。能和机器人对话就等于能在这台电脑上执行命令，所以默认只有扫码绑定的那个人能用，其他人需要配对码。'));
+    p.append(qqRow('状态', qq.error || (qq.bound ? `AppID ${qq.appId}` : '还没有绑定 QQ 机器人'), stateEl));
+    if (qq.bind) {
+      const b = qq.bind;
+      const box = el('div', 'qr');
+      const img = el('div', 'qimg');
+      if (b.qr) { const i = el('img'); i.src = b.qr; i.alt = '扫码绑定二维码'; i.style.width = '100%'; img.append(i); } else img.append(el('div', 'unote', b.state === 'failed' ? '' : '生成中…'));
+      const t = el('div', 'qtxt');
+      if (b.state === 'failed') t.append(el('b', null, '绑定失败'), el('div', null, b.error || ''), qqBtn('重新扫码', 'primary', () => qqDo({ op: 'bind_start' })));
+      else if (b.state === 'done') t.append(el('b', null, '绑定成功'));
+      else {
+        t.append(el('b', null, '用手机 QQ 扫码'), el('div', null, '扫码后按提示创建或选择机器人，完成后这里会自动连接。二维码过期会自动刷新。'));
+        if (b.url) { const a = el('a', null, '在手机上？点这里用 QQ 打开'); a.href = b.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; t.append(a); }
+        t.append(el('div', null, ''), qqBtn('取消', '', () => qqDo({ op: 'bind_cancel' })));
+      }
+      box.append(img, t);
+      p.append(box);
+    }
+    if (!qq.bound) {
+      if (!qq.bind) p.append(qqRow('扫码绑定', '用手机 QQ 扫一下就能创建并连接机器人（推荐）', qqBtn('开始扫码', 'primary', () => qqDo({ op: 'bind_start' }))));
+      p.append(qqRow('手动填写', '已经在 QQ 开放平台（q.qq.com）建好了机器人，可以直接填 AppID 和 AppSecret', qqBtn(qqManual ? '收起' : '填写', '', () => { qqManual = !qqManual; qqRender(); })));
+    } else {
+      p.append(qqRow('启用', '关掉后机器人下线，不再接收 QQ 消息', qqSwitch(qq.enabled, (v) => qqDo({ op: 'enable', enabled: v }))));
+      if (qq.state === 'error' || qq.state === 'stopped') p.append(qqRow('重新连接', '', qqBtn('重连', '', () => qqDo({ op: 'reconnect' }, '正在重连'))));
+      p.append(qqRow('重新扫码', '换一个机器人，或者凭据失效了', qqBtn('扫码', '', () => qqDo({ op: 'bind_start' }))));
+      p.append(qqRow('手动填写凭据', '', qqBtn(qqManual ? '收起' : '填写', '', () => { qqManual = !qqManual; qqRender(); })));
+      p.append(qqRow('解除绑定', '删除保存的凭据、白名单和 QQ 会话对应关系（Claude 的会话记录不会删）', qqBtn('解除绑定', 'danger', () => { if (confirm('确定解除绑定？机器人会下线，白名单也会清空。')) qqDo({ op: 'unbind' }, '已解除绑定'); })));
+    }
+    if (qqManual) {
+      const id = el('input', 'inp'); id.placeholder = 'AppID'; id.inputMode = 'numeric'; id.autocomplete = 'off';
+      const sec = el('input', 'inp'); sec.placeholder = 'AppSecret'; sec.type = 'password'; sec.autocomplete = 'new-password';
+      const go = qqBtn('保存并连接', 'primary', async () => { if (await qqDo({ op: 'manual', appId: id.value, appSecret: sec.value }, '已保存')) { qqManual = false; qqRender(); } });
+      p.append(qqRow('AppID / AppSecret', '手动填写时不知道你的 QQ 身份，保存后要用配对码把自己加进白名单', id, sec, go));
+    }
+  } else if (qqSection === 'access') {
+    if (!qq.bound) { p.append(el('div', 'unote', '先在“连接”里绑定机器人。')); return; }
+    p.append(el('div', 'sec-title', '可以私聊使用的人'));
+    const list = el('div', 'plist');
+    const item = (title, sub, kind, openid, owner) => {
+      const it = el('div', 'pi'); const g = el('div', 'grow'); const t = el('div', null, title); if (owner) t.append(el('span', 'tagown', '绑定人'));
+      g.append(t, el('div', 'sub', sub)); it.append(icon(kind === 'group' ? 'users' : 'bot'), g);
+      it.append(qqBtn('移除', 'danger', () => { if (confirm('确定移除？移除后对方不能再使用机器人。')) qqDo({ op: 'remove', kind, openid }); }));
+      list.append(it);
+    };
+    if (qq.owner) item('扫码绑定的人', 'OpenID ' + qq.owner.id + '…', 'owner', qq.owner.openid, true);
+    for (const u of qq.c2cAllow) item(u.name || '用户 ' + u.id, `OpenID ${u.id}… · ${new Date(u.addedAt).toLocaleDateString()} 加入`, 'c2c', u.openid);
+    if (!list.childNodes.length) list.append(el('div', 'pi', '还没有人。生成配对码，私聊发给机器人就能加进来。'));
+    p.append(list);
+    p.append(el('div', 'sec-title', '可以使用的群'));
+    const gl = el('div', 'plist');
+    for (const g of qq.groupAllow) { const it = el('div', 'pi'); const gg = el('div', 'grow'); gg.append(el('div', null, '群 ' + g.id), el('div', 'sub', `${new Date(g.addedAt).toLocaleDateString()} 加入 · 群里任何人 @机器人 都能使用`)); it.append(icon('users'), gg, qqBtn('移除', 'danger', () => { if (confirm('确定移除这个群？')) qqDo({ op: 'remove', kind: 'group', openid: g.openid }); })); gl.append(it); }
+    if (!gl.childNodes.length) gl.append(el('div', 'pi', '还没有群。在群里 @机器人 并发送配对码，就能把这个群加进来。'));
+    p.append(gl);
+    if (qq.pair) {
+      const left = Math.max(0, Math.round((qq.pair.expiresAt - qq.serverNow) / 60000));
+      const c = el('div', 'ctl'); c.append(el('span', 'pcode', qq.pair.code), qqBtn('作废', '', () => qqDo({ op: 'pair_cancel' })));
+      const row = el('div', 'srow'); const l = el('div'); l.append(el('div', 'st1', '配对码'), el('div', 'st2', `约 ${left} 分钟内有效，只能用一次。私聊发给机器人加入个人；在群里 @机器人 发送加入整个群。`)); row.append(l, c);
+      p.append(row);
+    } else {
+      p.append(qqRow('添加人或群', '生成一个一次性配对码，10 分钟内有效', qqBtn('生成配对码', 'primary', () => qqDo({ op: 'pair' }))));
+    }
+  } else {
+    p.append(qqRow('工作区', 'QQ 上的对话在哪个目录里运行', qqSelect(S.workspaces.map((w) => [w, w]), qq.cwd, (v) => qqDo({ op: 'settings', cwd: v }, '已保存'))));
+    p.append(qqRow('权限', 'QQ 发起的对话用什么权限模式。不是“完全权限”时，需要确认的操作会在 QQ 里问你', qqSelect([...$('modeSel').options].map((o) => [o.value, o.textContent]), qq.mode, (v) => {
+      if (v === 'bypassPermissions' && !confirm('完全权限下，Claude 执行命令、改文件都不再询问。确定用于 QQ 吗？')) return qqRender();
+      qqDo({ op: 'settings', mode: v }, '已保存');
+    })));
+    p.append(qqRow('模型', '默认模型；每个 QQ 会话也可以用 /model 单独切换', qqSelect([...$('modelSel').options].map((o) => [o.value, o.textContent]), qq.model, (v) => qqDo({ op: 'settings', model: v }, '已保存'))));
+    p.append(qqRow('Markdown 消息', '需要机器人在 QQ 开放平台申请到 Markdown 权限，没有权限时请保持关闭（会自动去掉 Markdown 记号）', qqSwitch(qq.markdown, (v) => qqDo({ op: 'settings', markdown: v }, '已保存'))));
+    p.append(el('div', 'sec-title', 'QQ 里可用的命令'));
+    const cmds = el('div', 'plist');
+    for (const [c, d] of [['/new', '开始新会话（清空上下文）'], ['/stop', '停止当前任务'], ['/status', '查看当前会话状态'], ['/model', '查看或切换模型（opus / sonnet / haiku / fable / default）'], ['/help', '查看所有命令']]) { const it = el('div', 'pi'); const g = el('div', 'grow'); g.append(el('div', null, c), el('div', 'sub', d)); it.append(g); cmds.append(it); }
+    p.append(cmds);
+  }
+  p.scrollTop = keepScroll;
+}
+qqLoad();
+
 for (const tab of document.querySelectorAll('.tab')) tab.onclick = () => setTab(tab.dataset.tab);
 
 // ================= 项目文件管理 =================
