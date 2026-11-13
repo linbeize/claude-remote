@@ -1,0 +1,27 @@
+{
+  "name": "claude-remote",
+  "version": "1.0.0",
+  "description": "用网页远程使用本机的 Claude Code（基于 Claude Agent SDK）",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "serve": "node run.mjs",
+    "setup": "node setup.mjs",
+    "cert": "node --env-file-if-exists=.env issue-cert.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.322",
+    "acme-client": "^5.4.0",
+    "ws": "^8.22.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/linbeize/claude-remote.git"
+  },
+  "engines": {
+    "node": ">=22.9"
+  }
+}

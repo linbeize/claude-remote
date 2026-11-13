@@ -1,0 +1,136 @@
+# Claude Remote
+
+用网页远程使用这台电脑上的 Claude Code，参考了 deepseek-harness 的界面。基于 [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)，需要 Node.js 22.9 或更高版本，并且这台电脑上的 Claude Code 已经登录。
+
+> **注意**：能登录这个网页，就等于能在这台电脑上执行任意命令（默认是完全权限模式）。请设置足够强的密码，务必用 HTTPS，并且只把它暴露给你自己。
+>
+> 这是个人项目，不是 Anthropic 官方产品。
+
+## 第一次使用
+
+```
+npm install
+npm run setup     # 设置用户名和密码（至少 12 位）
+npm start         # 打开 http://127.0.0.1:3080
+```
+
+改密码：再运行一次 `npm run setup`，所有已登录的设备都会被踢下线。
+
+## 崩溃后自动重启（推荐的启动方式）
+
+```
+npm run serve
+```
+
+和 `npm start` 一样启动服务，区别是多了一层守护进程：
+
+- 服务意外退出后自动重启。连续崩溃时，等待时间依次为 1、2、4、8、16、30 秒（最多 30 秒）。服务稳定运行满 1 分钟后，等待时间重新从 1 秒算起。
+- 账号或证书还没配置时不会反复重启，而是直接退出，并提示该运行哪条命令。
+- 输出同时写到终端和 `data/logs/server.log`。日志超过 10MB 时，旧日志改名为 `server.log.1`。
+- 按 Ctrl+C 正常停止，不会再重启。
+
+Windows PowerShell 默认不让运行 `npm.ps1`，这时请用 `npm.cmd run serve`。
+
+## 开机自动启动
+
+在**管理员** PowerShell 里，进入 claude-remote 目录后运行：
+
+```
+powershell -ExecutionPolicy Bypass -File autostart.ps1
+```
+
+这条命令会创建一个叫“Claude Remote”的计划任务，并立刻启动服务：
+
+- 开机就启动，不用先登录 Windows。以你的用户身份在后台运行，不弹窗口，也不保存你的 Windows 密码（S4U 方式）。
+- 任务运行的是 `run.mjs`，所以崩溃后同样会自动重启。没有终端窗口，输出都写在 `data/logs/server.log` 里。
+
+常用操作：
+
+- 停止：`Stop-ScheduledTask "Claude Remote"`
+- 启动：`Start-ScheduledTask "Claude Remote"`
+- 取消开机启动：`powershell -ExecutionPolicy Bypass -File autostart.ps1 -Remove`
+
+计划任务在运行时，不要再手动运行 `npm start` 或 `npm run serve`，否则两个进程会抢同一个端口。改了代码后，先停止任务再启动，就会用上新代码。
+
+## 文件上传和下载
+
+- **发给 Claude**：点输入框左下角的 **+**，也可以直接把文件拖进输入框，或者粘贴截图。文件会上传到当前工作区的 `uploads\` 目录，发送消息时自动附上文件路径。
+- **项目文件页**：顶部切到“项目文件”标签，可以浏览工作区里的文件。文本和图片能直接预览，也能下载、上传（按钮或拖进列表）、新建文件夹、重命名、删除（删除前会确认，删了不能恢复）。工作区根目录不能删除或改名。
+- 对话里“写入文件”“编辑文件”那一行右侧有下载图标，可以直接下载 Claude 改过的文件。
+- 只能访问已添加的工作区里的文件。单个文件最大 512MB。重名时会自动加编号，不会覆盖原文件。
+
+## 工作区
+
+左侧“工作区”列出 Claude 可以工作的目录。用文件夹加号图标添加电脑上的目录，“发现的其他目录”里会列出有 Claude Code 会话记录的目录，一键就能添加。新会话会在当前选中的工作区里运行。
+
+## 套餐用量和 Token 统计
+
+- **左下角**：显示订阅套餐 5 小时和 7 天限额已经用了多少，多久后重置（单独计数的模型也会列出来，比如 Fable）。每 3 分钟刷新一次，每跑完一轮也会刷新。数据来自 Claude Agent SDK 的 `/usage` 接口，不会消耗额度。这个接口 SDK 标注为“实验性”，以后升级 SDK 时可能要跟着调整。
+- **撞到限额后自动继续**：一轮对话因为 5 小时（或 7 天）限额中断时，服务会在额度重置后 1 分钟自动往这个会话发“继续刚才没完成的任务。”。对话里会显示倒计时卡片，可以取消；你手动发了消息，自动继续也会取消。计划记在 `data/resume.json`，服务重启后照样有效。连续撞限额 3 次就停止自动继续。测试时可以设环境变量 `CR_SIMULATE_LIMIT_SECONDS=40`，把每轮都当成撞到限额，40 秒后“重置”。
+- **Token 统计**：点左下角的“Token 统计”，会弹出统计窗口。统计本机所有 Claude Code 会话（`~/.claude/projects`），可按今天、7 天、30 天、90 天、全部查看：
+  - 总 token、输入、输出、缓存读写、缓存命中率
+  - 按 Anthropic API 价格折算的费用
+  - 每日费用柱状图，按模型、按项目的明细
+  - 价格在 `usage.mjs` 里，可以用 `data/pricing.json` 覆盖。订阅用户实际不按这个价格收费，只是用来对比用量。
+
+## 聊天界面里的统计
+
+每条回复下面、以及输入框上方（运行中实时刷新）会显示：
+
+- **耗时**：从网页发送到完成
+- **首字**：从发送到模型开始输出（含启动 Claude Code 的一两秒）
+- **输入 / 输出**：本轮主对话的 token 数，输入里注明了命中缓存的部分
+- **速度**：输出 token ÷ 实际生成时间（tok/s）
+- **API**：本轮调用模型的次数（每次工具调用后会再调一次）
+- **会话累计**：SDK 估算的整个会话累计费用，只是估算，不是账单
+
+## 环境变量
+
+| 变量 | 默认值 | 作用 |
+|---|---|---|
+| `PORT` | `3080` | 端口 |
+| `HOST` | `127.0.0.1` | 监听地址，建议保持只监听本机 |
+| `WORKDIR` | 启动时所在的目录 | Claude 工作的目录 |
+| `MODEL` | Claude Code 的默认模型 | 指定模型 |
+| `TRUST_PROXY` | 不设置 | 放在反向代理后面时设为 `1` |
+| `TLS_DOMAIN` | 不设置 | 设置后直接提供 HTTPS（443）和 HTTP 跳转（80） |
+| `HTTPS_PORT` / `HTTP_PORT` | `443` / `80` | HTTPS 模式下用的端口 |
+| `TLS_BIND` | `0.0.0.0` | HTTPS 模式下监听的地址 |
+
+这些变量都可以写在 `.env` 文件里，`npm start` 和 `npm run cert` 会自动读取。
+
+## 公网访问：本机 443 + Let's Encrypt（当前使用的方式）
+
+适用于本机直接有公网 IP、域名已解析到这台机器的情况。在 `.env` 里写上 `TLS_DOMAIN=你的域名`，然后：
+
+1. 防火墙放行 80 和 443 端口（要在**管理员** PowerShell 里运行）：
+   `New-NetFirewallRule -DisplayName "Claude Remote" -Direction Inbound -Protocol TCP -LocalPort 80,443 -Action Allow`
+2. `npm run cert`：同意 Let's Encrypt 订户协议后自动申请证书。想先试流程可以运行 `npm run cert -- --staging`，用的是测试环境，签出的证书浏览器不信任。
+3. `npm start`：服务监听 443（HTTPS）和 80（跳转到 HTTPS，并回应证书验证）。证书到期前 30 天会自动续期，不用重启。
+
+只接受用这个域名访问，用 IP 直接访问会被拒绝（421）。证书和 ACME 账号保存在 `data/tls/`。
+
+## 公网访问（另一种方式：Cloudflare Tunnel）
+
+不需要开放路由器端口，自带 HTTPS：
+
+1. 安装 cloudflared，再把一个域名接入 Cloudflare。
+2. 运行 `cloudflared tunnel login`，然后建一个 tunnel，指向 `http://127.0.0.1:3080`。
+3. 用 `TRUST_PROXY=1` 启动本服务。设置后，登录限速按访问者的真实 IP 计算，cookie 也会加上 Secure 标记。
+4. 想更保险，可以在 Cloudflare Zero Trust 里给这个域名加一层 Access 登录。
+
+**不要**用 `HOST=0.0.0.0` 直接暴露到公网。没有 HTTPS 时，密码会明文传输。
+
+## 安全设计
+
+- 密码用 scrypt 加盐哈希存储。（两步验证暂时关闭了，`auth.mjs` 里的 TOTP 校验代码还在，以后可以再打开）
+- 登录限速：单个 IP 15 分钟内失败 5 次，锁定 15 分钟；所有 IP 合计 15 分钟内失败 30 次，全部登录暂停 15 分钟。
+- 会话 cookie 设置了 HttpOnly 和 SameSite=Strict，7 天过期。服务端只保存会话 ID 的哈希，重启服务后不用重新登录。
+- 登录和 WebSocket 都会校验 Origin，防跨站请求。页面带 CSP（nonce 脚本）和防嵌入头。
+- 退出登录或会话过期时，WebSocket 连接会立刻断开。
+- 网页默认用**完全权限**模式，Claude 执行命令、改文件都不再询问。需要逐个确认时，在输入框左下角的盾牌图标里切回“标准模式”。
+- 账号数据在 `data/` 目录，已加入 `.gitignore`。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。

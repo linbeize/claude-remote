@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>登录 · Claude Remote</title>
+<style>
+:root {
+  --bg: #f4f2ee; --card: #ffffff; --text: #1f1e1c; --muted: #6f6b64; --border: #e2ded6;
+  --field: #faf9f7; --accent: #c96442; --accent-hover: #b4583a; --bad: #b3261e; --bad-bg: #fdecea;
+  --ring: rgba(201, 100, 66, .25);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1917; --card: #24231f; --text: #ecebe8; --muted: #a29e96; --border: #3a3834;
+    --field: #1e1d1a; --accent: #d97757; --accent-hover: #e38a6c; --bad: #f28b82; --bad-bg: #3b2321;
+    --ring: rgba(217, 119, 87, .3);
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.wrap { width: 100%; max-width: 380px; }
+.brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 22px; }
+.brand svg { width: 34px; height: 34px; color: var(--accent); }
+.brand span { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px 26px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.04); }
+h1 { font-size: 18px; margin: 0 0 4px; }
+.sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+label { display: block; font-size: 13px; font-weight: 550; margin: 0 0 6px; }
+.field { position: relative; margin-bottom: 16px; }
+input {
+  width: 100%; height: 44px; padding: 0 12px; font: inherit; color: var(--text);
+  background: var(--field); border: 1px solid var(--border); border-radius: 10px; outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+input.code { letter-spacing: .4em; font-variant-numeric: tabular-nums; text-align: center; font-size: 18px; }
+.toggle {
+  position: absolute; right: 6px; bottom: 6px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.toggle:hover { color: var(--text); }
+.has-toggle input { padding-right: 56px; }
+#codeRow { display: none; }
+.error {
+  display: none; background: var(--bad-bg); color: var(--bad); border-radius: 10px;
+  padding: 9px 12px; font-size: 13px; margin-bottom: 16px;
+}
+button.submit {
+  width: 100%; height: 44px; border: 0; border-radius: 10px; background: var(--accent); color: #fff;
+  font: inherit; font-weight: 600; cursor: pointer; transition: background .15s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+button.submit:hover { background: var(--accent-hover); }
+button.submit:disabled { opacity: .6; cursor: default; }
+.spin { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; display: none; }
+button.busy .spin { display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+.foot .warn { color: var(--bad); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="14" rx="3"/><path d="M7 9l3 2.5L7 14"/><path d="M12.5 14H17"/><path d="M8 21h8"/>
+    </svg>
+    <span>Claude Remote</span>
+  </div>
+
+  <form class="card" id="form" novalidate>
+    <h1>登录</h1>
+    <p class="sub">远程访问这台电脑上的 Claude Code</p>
+
+    <div class="error" id="error" role="alert"></div>
+
+    <div class="field">
+      <label for="username">用户名</label>
+      <input id="username" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required autofocus>
+    </div>
+
+    <div class="field has-toggle">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="button" class="toggle" id="toggle" aria-label="显示密码">显示</button>
+    </div>
+
+    <div class="field" id="codeRow">
+      <label for="code">两步验证码</label>
+      <input id="code" name="code" class="code" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="••••••">
+    </div>
+
+    <button class="submit" id="submit" type="submit"><span class="spin"></span><span id="submitText">登录</span></button>
+  </form>
+
+  <p class="foot" id="foot">登录后 7 天内有效</p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let need2fa = false;
+
+fetch('/api/login-config').then((r) => r.json()).then((cfg) => {
+  need2fa = cfg.totp;
+  if (need2fa) $('codeRow').style.display = 'block';
+  if (!cfg.secure) {
+    const w = document.createElement('div');
+    w.className = 'warn';
+    w.textContent = '⚠ 当前不是 HTTPS 连接，公网访问请务必走 HTTPS';
+    $('foot').append(w);
+  }
+});
+
+$('toggle').onclick = () => {
+  const p = $('password');
+  const show = p.type === 'password';
+  p.type = show ? 'text' : 'password';
+  $('toggle').textContent = show ? '隐藏' : '显示';
+  $('toggle').setAttribute('aria-label', show ? '隐藏密码' : '显示密码');
+};
+$('code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+
+function showError(msg) { const e = $('error'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const username = $('username').value.trim();
+  const password = $('password').value;
+  const code = $('code').value;
+  if (!username || !password) return showError('请填写用户名和密码');
+  if (need2fa && code.length !== 6) return showError('请输入 6 位验证码');
+  showError('');
+  const btn = $('submit');
+  btn.disabled = true; btn.classList.add('busy'); $('submitText').textContent = '登录中…';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, code }),
+    });
+    if (r.ok) { location.replace('/'); return; }
+    const data = await r.json().catch(() => ({}));
+    showError(data.error || '登录失败');
+    $('password').value = ''; $('code').value = '';
+    $('password').focus();
+  } catch {
+    showError('连不上服务器，请检查网络');
+  } finally {
+    btn.disabled = false; btn.classList.remove('busy'); $('submitText').textContent = '登录';
+  }
+};
+</script>
+</body>
+</html>
