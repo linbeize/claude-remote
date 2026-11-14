@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import { getLimits, getStats } from './usage.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const FILE = path.join(DIR, 'data', 'qqbot.json');
@@ -197,7 +198,9 @@ async function command(b, msg, chatId, c, peer, text) {
   const say = (t) => reply(b, msg.replyTarget, t);
   switch ((cmd || '').toLowerCase()) {
     case 'help': case '帮助':
-      return say(['可用命令：', '/new  开始新会话（清空上下文）', '/stop  停止当前任务', '/status  查看当前会话状态', '/model [opus|sonnet|haiku|fable|default]  查看或切换模型', '', '需要确认的操作会提示你回复“允许”“总是允许”或“拒绝”。'].join('\n'));
+      return say(['可用命令：', '/new  开始新会话（清空上下文）', '/stop  停止当前任务', '/status  查看当前会话状态', '/usage  查看套餐用量和今天的 token', '/model [opus|sonnet|haiku|fable|default]  查看或切换模型', '', '需要确认的操作会提示你回复“允许”“总是允许”或“拒绝”。'].join('\n'));
+    case 'usage': case '用量':
+      return say(await usageText());
     case 'new': case 'reset': case 'clear':
       if (host.isRunning(chatId)) return say('还有任务在运行，先发 /stop 停止。');
       delete peer.sessionId; save();
@@ -226,6 +229,53 @@ async function command(b, msg, chatId, c, peer, text) {
     default:
       return say('不认识这个命令，发 /help 看可用命令。');
   }
+}
+
+// /usage：套餐 5 小时 / 7 天限额 + 今天按 API 价格折算的 token 用量（和网页左下角、Token 统计一致）
+const fmtTok = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n)));
+const fmtUsd = (v) => (v >= 100 ? `$${v.toFixed(0)}` : v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(3)}`);
+function fmtLeft(ms) {
+  if (ms == null) return '';
+  const m = Math.max(0, Math.round(ms / 60000));
+  if (m < 1) return '即将重置';
+  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+  return (d ? `${d} 天 ${h} 小时` : h ? `${h} 小时 ${mm} 分` : `${mm} 分钟`) + '后重置';
+}
+export async function usageText() {
+  const lines = [];
+  const [L, S] = await Promise.all([
+    getLimits(workdir()).catch((e) => ({ ok: false, error: e.message })),
+    getStats(1).catch(() => null),
+  ]);
+  if (L?.ok) {
+    lines.push(`套餐用量${L.plan ? `（${String(L.plan).replace(/^\w/, (c) => c.toUpperCase())}）` : ''}`);
+    const elapsed = Date.now() - (L.fetchedAt || Date.now());
+    const row = (name, w) => {
+      if (!w || w.pct == null) return;
+      const pct = Math.round(w.pct);
+      const warn = pct >= 95 ? ' ⚠️' : '';
+      const left = w.resetsInMs != null ? fmtLeft(w.resetsInMs - elapsed) : '';
+      lines.push(`${name}：${pct}%${warn}${left ? '，' + left : ''}`);
+    };
+    row('5 小时', L.fiveHour);
+    row('7 天', L.sevenDay);
+    row('7 天 Opus', L.sevenDayOpus);
+    row('7 天 Sonnet', L.sevenDaySonnet);
+    for (const m of L.models || []) row(`7 天 ${m.name}`, m);
+    if (L.extra) lines.push(`额外用量：${L.extra.used ?? 0} / ${L.extra.limit ?? '—'} ${L.extra.currency || ''}`.trim());
+    if (lines.length === 1) lines.push('暂时没有限额数据');
+  } else {
+    lines.push('套餐用量：读取失败' + (L?.error ? `（${L.error}）` : ''));
+  }
+  if (S?.total) {
+    const T = S.total;
+    const inAll = T.input + T.cacheRead + T.cacheWrite;
+    lines.push('', '今天（本机所有 Claude Code 会话）');
+    lines.push(`按 API 价格折算：${fmtUsd(T.cost)}（订阅不按这个收费）`);
+    lines.push(`token：${fmtTok(inAll + T.output)}，输出 ${fmtTok(T.output)}，缓存命中 ${inAll ? Math.round(T.cacheRead / inAll * 100) : 0}%`);
+    lines.push(`请求：${T.requests} 次`);
+  }
+  return lines.join('\n');
 }
 
 async function saveAttachments(msg) {

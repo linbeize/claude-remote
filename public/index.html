@@ -1664,7 +1664,7 @@ function qqRender() {
     p.append(qqRow('Markdown 消息', '需要机器人在 QQ 开放平台申请到 Markdown 权限，没有权限时请保持关闭（会自动去掉 Markdown 记号）', qqSwitch(qq.markdown, (v) => qqDo({ op: 'settings', markdown: v }, '已保存'))));
     p.append(el('div', 'sec-title', 'QQ 里可用的命令'));
     const cmds = el('div', 'plist');
-    for (const [c, d] of [['/new', '开始新会话（清空上下文）'], ['/stop', '停止当前任务'], ['/status', '查看当前会话状态'], ['/model', '查看或切换模型（opus / sonnet / haiku / fable / default）'], ['/help', '查看所有命令']]) { const it = el('div', 'pi'); const g = el('div', 'grow'); g.append(el('div', null, c), el('div', 'sub', d)); it.append(g); cmds.append(it); }
+    for (const [c, d] of [['/new', '开始新会话（清空上下文）'], ['/stop', '停止当前任务'], ['/status', '查看当前会话状态'], ['/usage', '查看套餐 5 小时 / 7 天用量和今天的 token'],['/model', '查看或切换模型（opus / sonnet / haiku / fable / default）'], ['/help', '查看所有命令']]) { const it = el('div', 'pi'); const g = el('div', 'grow'); g.append(el('div', null, c), el('div', 'sub', d)); it.append(g); cmds.append(it); }
     p.append(cmds);
   }
   p.scrollTop = keepScroll;
