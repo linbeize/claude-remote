@@ -1753,17 +1753,18 @@ function qqRender() {
       p.append(qqRow('添加人或群', '生成一个一次性配对码，10 分钟内有效', qqBtn('生成配对码', 'primary', () => qqDo({ op: 'pair' }))));
     }
   } else {
-    p.append(qqRow('工作区', 'QQ 上的对话在哪个目录里运行', qqSelect(S.workspaces.map((w) => [w, w]), qq.cwd, (v) => qqDo({ op: 'settings', cwd: v }, '已保存'))));
+    p.append(qqRow('工作区', 'QQ 上的对话在哪个目录里运行，收到的文件存在它的 uploads 文件夹。默认是专用的 qqbot 文件夹；换工作区后，QQ 上会开始新会话', qqSelect((S.workspaces.includes(qq.cwd) ? S.workspaces : [qq.cwd, ...S.workspaces]).map((w) => [w, w]), qq.cwd, (v) => qqDo({ op: 'settings', cwd: v }, '已保存'))));
     p.append(qqRow('权限', 'QQ 发起的对话用什么权限模式。不是“完全权限”时，需要确认的操作会在 QQ 里问你', qqSelect([...$('modeSel').options].map((o) => [o.value, o.textContent]), qq.mode, (v) => {
       if (v === 'bypassPermissions' && !confirm('完全权限下，Claude 执行命令、改文件都不再询问。确定用于 QQ 吗？')) return qqRender();
       qqDo({ op: 'settings', mode: v }, '已保存');
     })));
     p.append(qqRow('模型', '默认模型；每个 QQ 会话也可以用 /model 单独切换', qqSelect([...$('modelSel').options].map((o) => [o.value, o.textContent]), qq.model, (v) => qqDo({ op: 'settings', model: v }, '已保存'))));
+    p.append(qqRow('显示思考过程', 'Claude 的思考摘要以“💭”开头单独发一条消息。每段思考占一条，会多用 QQ 的回复次数；太长的截取前 1500 字。在 QQ 里也可以发 /think on 或 /think off 切换', qqSwitch(qq.thinking, (v) => qqDo({ op: 'settings', thinking: v }, '已保存'))));
     p.append(qqRow('流式输出（实验）', '私聊时回复边生成边显示，只在私聊有效。目前 QQ 显示不稳定，可能出现“此条消息不支持显示”或同一段话发两遍，默认关闭', qqSwitch(qq.streaming, (v) => qqDo({ op: 'settings', streaming: v }, '已保存'))));
     p.append(qqRow('Markdown 消息', '需要机器人在 QQ 开放平台申请到 Markdown 权限，没有权限时请保持关闭（会自动去掉 Markdown 记号）', qqSwitch(qq.markdown, (v) => qqDo({ op: 'settings', markdown: v }, '已保存'))));
     p.append(el('div', 'sec-title', 'QQ 里可用的命令'));
     const cmds = el('div', 'plist');
-    for (const [c, d] of [['/new', '开始新会话（清空上下文）'], ['/stop', '停止当前任务'], ['/status', '查看当前会话状态'], ['/usage', '查看套餐 5 小时 / 7 天用量和今天的 token'],['/model', '查看或切换模型（opus / sonnet / haiku / fable / default）'], ['/help', '查看所有命令']]) { const it = el('div', 'pi'); const g = el('div', 'grow'); g.append(el('div', null, c), el('div', 'sub', d)); it.append(g); cmds.append(it); }
+    for (const [c, d] of [['/new', '开始新会话（清空上下文）'], ['/stop', '停止当前任务'], ['/status', '查看当前会话状态'], ['/usage', '查看套餐 5 小时 / 7 天用量和今天的 token'],['/model', '查看或切换模型（opus / sonnet / haiku / fable / default）'], ['/think', '显示或隐藏思考过程（on / off）'],['/help', '查看所有命令']]) { const it = el('div', 'pi'); const g = el('div', 'grow'); g.append(el('div', null, c), el('div', 'sub', d)); it.append(g); cmds.append(it); }
     p.append(cmds);
   }
   p.scrollTop = keepScroll;

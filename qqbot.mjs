@@ -43,7 +43,7 @@ function defaults() {
   return {
     appId: '', appSecret: '', ownerOpenid: '', enabled: true,
     cwd: '', model: '', mode: 'bypassPermissions',
-    markdown: false, streaming: false, // 流式默认关：QQ 客户端显示不稳定（会出现“不支持显示”或重复），官方 dsh 插件实际上也没在用
+    markdown: false, thinking: false, streaming: false, // thinking：把 Claude 的思考摘要也发到 QQ（每段思考占一条消息）。 流式默认关：QQ 客户端显示不稳定（会出现“不支持显示”或重复），官方 dsh 插件实际上也没在用
     c2cAllow: [], groupAllow: [],
     peers: {},       // chatId -> { sessionId, model }
   };
@@ -59,6 +59,19 @@ function save() {
 }
 const bound = () => Boolean(cfg.appId && cfg.appSecret);
 const workdir = () => (cfg.cwd && host.workspaces.has(cfg.cwd) ? cfg.cwd : host.WORKDIR);
+// QQ 专用工作区：默认工作目录下的 qqbot 文件夹。没设置过工作区时自动建好、加进工作区列表，
+// 这样 QQ 上的对话、收到的文件都放在这里，不会散落在默认工作区里
+export const qqWorkspace = () => path.join(host.WORKDIR, 'qqbot');
+function ensureWorkspace() {
+  if (cfg.cwd) return;
+  const dir = qqWorkspace();
+  try {
+    fs.mkdirSync(path.join(dir, 'uploads'), { recursive: true });
+    host.addWorkspace(dir);
+    cfg.cwd = dir; save();
+    console.log('[qqbot] 已建好 QQ 专用工作区：' + dir);
+  } catch (e) { console.error('[qqbot] 建 QQ 专用工作区失败：' + e.message); }
+}
 function setStatus(state, error = null) { status.state = state; status.error = error; status.since = Date.now(); }
 
 // ---------- 连接 ----------
@@ -193,10 +206,17 @@ async function onMessage(b, msg) {
   if (!prompt) return;
   const who = (msg.kind === 'group' ? `（来自 QQ 群，发送者 ${msg.senderName || String(msg.senderId || '').slice(0, 8)}` : '（来自 QQ 私聊') + `。用对方使用的语言回复；要把图片或文件发给对方，用 ${SEND_TOOL} 工具）`;
 
+  // 会话是按工作目录保存的：工作区换过之后，旧会话在新目录里接不上，改为开始新会话
+  const cwd = workdir();
+  if (peer.sessionId && (peer.cwd || host.WORKDIR) !== cwd) {
+    delete peer.sessionId;
+    await reply(b, msg.replyTarget, '工作区换了，这次开始新会话。').catch(() => {});
+  }
+  if (peer.cwd !== cwd) { peer.cwd = cwd; save(); }
   c.fromQQ = true; c.texts = [];
   try {
     await host.startRun(chatId, {
-      sessionId: peer.sessionId, text: `${prompt}\n\n${who}`, cwd: workdir(),
+      sessionId: peer.sessionId, text: `${prompt}\n\n${who}`, cwd,
       model: peer.model ?? cfg.model ?? '', mode: cfg.mode || 'bypassPermissions', origin: 'qq',
     });
   } catch (e) {
@@ -211,7 +231,7 @@ async function command(b, msg, chatId, c, peer, text) {
   const say = (t) => reply(b, msg.replyTarget, t);
   switch ((cmd || '').toLowerCase()) {
     case 'help': case '帮助':
-      return say(['可用命令：', '/new  开始新会话（清空上下文）', '/stop  停止当前任务', '/status  查看当前会话状态', '/usage  查看套餐用量和今天的 token', '/model [opus|sonnet|haiku|fable|default]  查看或切换模型', '', '需要确认的操作会提示你回复“允许”“总是允许”或“拒绝”。'].join('\n'));
+      return say(['可用命令：', '/new  开始新会话（清空上下文）', '/stop  停止当前任务', '/status  查看当前会话状态', '/usage  查看套餐用量和今天的 token', '/model [opus|sonnet|haiku|fable|default]  查看或切换模型', '/think [on|off]  显示或隐藏 Claude 的思考过程', '','需要确认的操作会提示你回复“允许”“总是允许”或“拒绝”。'].join('\n'));
     case 'usage': case '用量':
       return say(await usageText());
     case 'new': case 'reset': case 'clear':
@@ -238,6 +258,13 @@ async function command(b, msg, chatId, c, peer, text) {
       if (m == null) return say('不认识这个模型。可选：opus、sonnet、haiku、fable、default');
       peer.model = m; save();
       return say(`已切换到 ${m || 'Claude Code 默认模型'}，下一条消息开始生效。`);
+    }
+    case 'think': case 'thinking': case '思考': {
+      const a = arg.toLowerCase();
+      const v = /^(on|开|打开|1)$/.test(a) ? true : /^(off|关|关闭|0)$/.test(a) ? false : a ? null : !cfg.thinking;
+      if (v == null) return say('用法：/think on 或 /think off');
+      cfg.thinking = v; save();
+      return say(v ? '已打开：Claude 的思考过程会以“💭”开头单独发给你。每段思考占一条消息，会多用一些 QQ 回复次数。' : '已关闭思考过程显示。');
     }
     default:
       return say('不认识这个命令，发 /help 看可用命令。');
@@ -525,6 +552,8 @@ function canStream(c) {
 // 同一个 QQ 会话的发送按顺序排队，保证先说的先到
 function queue(c, fn) { c.out = (c.out || Promise.resolve()).then(fn).catch((e) => console.error('[qqbot] 发送出错：', e)); return c.out; }
 
+const THINK_MAX = 1500; // 一段思考最多发多少字，太长的截断，免得刷屏、占掉回复次数
+
 function onRunEvent(ev) {
   const chatId = ev.chatId;
   if (!String(chatId).startsWith('qq:')) return;
@@ -556,6 +585,10 @@ function onRunEvent(ev) {
     case 'message': {
       if (!c.fromQQ || ev.role !== 'assistant' || !Array.isArray(ev.content)) break;
       const said = ev.content.filter((b) => b.type === 'text' && b.text?.trim()).map((b) => b.text).join('\n\n');
+      if (cfg.thinking === true) {
+        const thought = ev.content.filter((b) => b.type === 'thinking' && b.thinking?.trim()).map((b) => b.thinking.trim()).join('\n\n');
+        if (thought) queue(c, () => replyChat(chatId, '💭 ' + (thought.length > THINK_MAX ? thought.slice(0, THINK_MAX) + '…' : thought)));
+      }
       for (const blk of ev.content) {
         if (blk.type === 'text' && blk.text?.trim()) c.texts.push(blk.text);
         if (blk.type === 'tool_use') c.texts = []; // 只保留最后一次调用工具之后的文字，也就是最终回答
@@ -651,7 +684,7 @@ export function getQQStatus() {
     bound: bound(), enabled: cfg.enabled, appId: cfg.appId ? cfg.appId : null,
     state: status.state, error: status.error,
     owner: cfg.ownerOpenid ? { id: cfg.ownerOpenid.slice(0, 8), openid: cfg.ownerOpenid } : null,
-    cwd: workdir(), model: cfg.model || '', mode: cfg.mode, markdown: Boolean(cfg.markdown), streaming: cfg.streaming === true,
+    cwd: workdir(), model: cfg.model || '', mode: cfg.mode, markdown: Boolean(cfg.markdown), thinking: cfg.thinking === true, streaming: cfg.streaming === true,
     c2cAllow: cfg.c2cAllow.map((u) => ({ id: u.openid.slice(0, 8), openid: u.openid, name: u.name, addedAt: u.addedAt })),
     groupAllow: cfg.groupAllow.map((g) => ({ id: g.openid.slice(0, 8), openid: g.openid, addedAt: g.addedAt })),
     pair: pair && Date.now() < pair.expiresAt ? { code: pair.code, expiresAt: pair.expiresAt } : null,
@@ -705,6 +738,7 @@ export async function qqAction(body) {
         cfg.mode = String(body.mode);
       }
       if (body.streaming !== undefined) cfg.streaming = Boolean(body.streaming);
+      if (body.thinking !== undefined) cfg.thinking = Boolean(body.thinking);
       if (body.markdown !== undefined) {
         cfg.markdown = Boolean(body.markdown);
         save();
@@ -736,6 +770,7 @@ export async function qqAction(body) {
 export function initQQBot(h) {
   host = h;
   load();
+  ensureWorkspace();
   host.onRunEvent(onRunEvent);
   // 测试用：同一台电脑上再起一个测试服务时设 CR_NO_QQBOT=1，免得用同一个机器人登录、把正式服务挤下线
   if (process.env.CR_NO_QQBOT === '1') { setStatus('disabled', '测试模式（CR_NO_QQBOT=1），QQ 机器人未启动'); return; }

@@ -690,6 +690,7 @@ function resolvePermission(chatId, id, decision, message) {
 // QQ 机器人：复用同一套对话运行逻辑，QQ 上的会话在网页里也能看到、接着聊
 initQQBot({
   WORKDIR, workspaces, MODELS, MODES,
+  addWorkspace: (p) => { workspaces.add(path.resolve(p)); saveWorkspaces(); },
   startRun: (chatId, opts) => { cancelResume(chatId, 'manual'); resumeAttempts.delete(chatId); return startRun(chatId, opts); },
   isRunning: (chatId) => runs.has(chatId),
   interrupt: (chatId) => runs.get(chatId)?.abort.abort(),
