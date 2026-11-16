@@ -611,8 +611,13 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto, origi
       emit(run, chatId, { type: 'permission_resolved', id, label });
       resolve(result);
     };
-    run.pending.set(id, { done, suggestions: opts.suggestions });
+    run.pending.set(id, { done, suggestions: opts.suggestions, toolName, input });
     opts.signal.addEventListener('abort', () => done({ behavior: 'deny', message: '已中止' }, '已中止'));
+    // Claude 向用户提问：发成“提问”事件，网页 / QQ 上直接选选项或自己写答案，而不是“允许 / 拒绝”
+    if (toolName === 'AskUserQuestion' && Array.isArray(input?.questions)) {
+      emit(run, chatId, { type: 'question_request', id, questions: input.questions });
+      return;
+    }
     emit(run, chatId, {
       type: 'permission_request', id, toolName, input,
       title: opts.title, reason: opts.decisionReason, canAlways: Boolean(opts.suggestions?.length),
@@ -656,6 +661,23 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto, origi
   }
 }
 
+// 回答 Claude 的提问。answers：{ 问题原文: 答案 }（多选用“, ”连接）；notes：{ 问题原文: 补充说明 }。answers 为空表示跳过
+function answerQuestion(chatId, id, answers, notes) {
+  const p = runs.get(chatId)?.pending.get(String(id));
+  if (!p || p.toolName !== 'AskUserQuestion') return false;
+  const qs = (p.input?.questions || []).map((q) => q.question);
+  const clean = {};
+  for (const q of qs) { const a = answers?.[q]; if (typeof a === 'string' && a.trim()) clean[q] = a.trim().slice(0, 2000); }
+  if (!Object.keys(clean).length) {
+    p.done({ behavior: 'deny', message: '用户跳过了这个问题，没有选择。请根据已有信息继续，或者直接在对话里问用户。' }, '已跳过');
+    return true;
+  }
+  const annotations = {};
+  for (const q of qs) { const n = notes?.[q]; if (typeof n === 'string' && n.trim()) annotations[q] = { notes: n.trim().slice(0, 2000) }; }
+  p.done({ behavior: 'allow', updatedInput: { ...p.input, answers: clean, ...(Object.keys(annotations).length ? { annotations } : {}) } },
+    '已回答：' + qs.filter((q) => clean[q]).map((q) => clean[q]).join('；'));
+  return true;
+}
 function resolvePermission(chatId, id, decision, message) {
   const p = runs.get(chatId)?.pending.get(String(id));
   if (!p) return false;
@@ -672,6 +694,7 @@ initQQBot({
   isRunning: (chatId) => runs.has(chatId),
   interrupt: (chatId) => runs.get(chatId)?.abort.abort(),
   resolvePermission,
+  answerQuestion,
   onRunEvent: (fn) => runListeners.add(fn),
 });
 for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { stopQQBot(); process.exit(0); });
@@ -760,6 +783,11 @@ wss.on('connection', (ws) => {
         }
         case 'permission': {
           resolvePermission(msg.chatId, msg.id, msg.decision, msg.message);
+          break;
+        }
+        case 'answer': {
+          const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+          answerQuestion(String(msg.chatId), msg.id, obj(msg.answers), obj(msg.notes));
           break;
         }
       }

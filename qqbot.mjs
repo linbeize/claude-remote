@@ -156,6 +156,19 @@ async function onMessage(b, msg) {
   const c = chatState(chatId, msg);
   const peer = cfg.peers[chatId] || (cfg.peers[chatId] = {});
 
+  // Claude 在等你回答问题：回复数字选选项，或者直接写答案；“跳过”就跳过
+  if (c.pendingQ && !text.startsWith('/')) {
+    const { id, questions } = c.pendingQ;
+    if (/^(跳过|skip|算了)$/i.test(text.replace(/[。.!！\s]/g, ''))) { c.pendingQ = null; host.answerQuestion(chatId, id, {}); return; }
+    const parts = questions.length > 1 ? text.split(/\n+|[;；]/).map((s) => s.trim()).filter(Boolean) : [text];
+    if (parts.length < questions.length) return reply(b, msg.replyTarget, `一共有 ${questions.length} 个问题，请每行回答一个（按顺序），或者回复“跳过”。`);
+    const answers = {};
+    questions.forEach((q, i) => { answers[q.question] = parseAnswer(q, parts[i]); });
+    c.pendingQ = null;
+    host.answerQuestion(chatId, id, answers);
+    return;
+  }
+
   // 正在等待权限确认
   if (c.pendingPerm) {
     const t = text.replace(/[。.!！\s]/g, '').toLowerCase();
@@ -229,6 +242,33 @@ async function command(b, msg, chatId, c, peer, text) {
     default:
       return say('不认识这个命令，发 /help 看可用命令。');
   }
+}
+
+// ---------- Claude 提问（AskUserQuestion）在 QQ 里的样子 ----------
+const NUM = ['①', '②', '③', '④'];
+export function questionText(qs) {
+  const lines = ['Claude 想问你：'];
+  qs.forEach((q, i) => {
+    lines.push('');
+    lines.push(`${qs.length > 1 ? NUM[i] + ' ' : ''}${q.header ? `【${q.header}】` : ''}${q.question}${q.multiSelect ? '（可多选）' : ''}`);
+    (q.options || []).forEach((o, k) => lines.push(`${k + 1}. ${o.label}${o.description ? ' — ' + o.description : ''}`));
+  });
+  lines.push('');
+  if (qs.length > 1) lines.push('请每行回答一个问题（按顺序）：回复选项数字，或者直接写你的答案。');
+  else lines.push(qs[0]?.multiSelect ? '回复选项数字（多选用空格分开，比如“1 3”），或者直接写你的答案。' : '回复选项数字，或者直接写你的答案。');
+  lines.push('回复“跳过”可以不回答。');
+  return lines.join('\n');
+}
+// 把一行回复变成答案：全是有效的选项数字就换成选项名称，否则当作自己写的答案
+export function parseAnswer(q, reply) {
+  const s = String(reply || '').trim();
+  const nums = s.split(/[\s,，、]+/).filter(Boolean);
+  const opts = q.options || [];
+  if (nums.length && nums.every((n) => /^\d+$/.test(n) && +n >= 1 && +n <= opts.length)) {
+    const picked = [...new Set(nums.map(Number))];
+    return (q.multiSelect ? picked : picked.slice(0, 1)).map((n) => opts[n - 1].label).join(', ');
+  }
+  return s;
 }
 
 // /usage：套餐 5 小时 / 7 天限额 + 今天按 API 价格折算的 token 用量（和网页左下角、Token 统计一致）
@@ -530,8 +570,16 @@ function onRunEvent(ev) {
       c.pendingPerm = ev.id;
       queue(c, () => replyChat(chatId, `Claude 想要${toolLabel(ev.toolName, ev.input)}\n\n回复“允许”“总是允许”或“拒绝”。`));
       break;
+    case 'question_request': {
+      if (!c.fromQQ) break;
+      const qs = (ev.questions || []).slice(0, 4);
+      c.pendingQ = { id: ev.id, questions: qs };
+      queue(c, () => replyChat(chatId, questionText(qs)));
+      break;
+    }
     case 'permission_resolved':
       if (c.pendingPerm === ev.id) c.pendingPerm = null;
+      if (c.pendingQ?.id === ev.id) c.pendingQ = null;
       break;
     case 'error':
       if (c.fromQQ) queue(c, () => replyChat(chatId, '出错了：' + ev.message));
@@ -689,6 +737,8 @@ export function initQQBot(h) {
   host = h;
   load();
   host.onRunEvent(onRunEvent);
+  // 测试用：同一台电脑上再起一个测试服务时设 CR_NO_QQBOT=1，免得用同一个机器人登录、把正式服务挤下线
+  if (process.env.CR_NO_QQBOT === '1') { setStatus('disabled', '测试模式（CR_NO_QQBOT=1），QQ 机器人未启动'); return; }
   if (bound() && cfg.enabled) startBot().catch((e) => { setStatus('error', e.message); console.error('[qqbot] 启动失败：' + e.message); });
   else setStatus(bound() ? 'disabled' : 'unbound');
 }

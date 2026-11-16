@@ -270,6 +270,24 @@ body.tab-files #chat, body.tab-files #composer { display: none; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .perm .res { color: var(--muted); font-size: 13px; }
+/* Claude 提问卡片 */
+.ask { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 14px; padding: 12px 14px; margin: 10px 0; }
+.ask.answered { border-color: var(--border); background: transparent; }
+.ask .ahead { font-weight: 600; margin-bottom: 8px; }
+.ask .res { color: var(--muted); font-size: 13.5px; }
+.ask .aq { margin-bottom: 12px; }
+.ask .aqt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 14.5px; }
+.ask .chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); color: var(--text2); }
+.ask .aopts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.ask .aopt { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+.ask .aopt:hover { border-color: var(--accent); }
+.ask .aopt.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.ask .aopt span { color: var(--text2); font-size: 12.5px; line-height: 1.5; }
+.ask .apv { margin: 4px 0 0; max-height: 140px; overflow: auto; font-size: 12px; background: var(--code); padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; }
+.ask .aother { width: 100%; max-width: none; }
+.ask .btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ask .ahint { color: var(--muted); font-size: 12.5px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* 项目文件管理 */
 .fmcol { max-width: 1000px; margin: 0 auto; padding: 18px 28px 40px; }
@@ -806,6 +824,9 @@ function renderComposer() {
   b.classList.toggle('stop', !!running);
   b.title = running ? '停止' : '发送';
   b.disabled = !running && uploadsBusy();
+  // 等你回答问题时：输入框提示可以直接打字回答，回车就是提交答案
+  if (current?.pendingQ) $('input').placeholder = current.pendingQ.questions.length === 1 ? '直接输入你的回答，回车提交…' : '请在上面的卡片里回答问题';
+  else { try { setPlaceholder(); } catch { /* 页面初始化早期还没定义 */ } }
 }
 function renderAll() { renderTree(); renderTop(); renderStats(); renderComposer(); }
 setInterval(() => {
@@ -1023,6 +1044,71 @@ function addPermission(c, target, m) {
   d.append(btns);
   target.append(d);
 }
+// Claude 提问（AskUserQuestion）：每个问题列出选项，可以多选（如果允许），也可以在“其他”里自己写
+function addQuestion(c, target, m) {
+  const qs = (m.questions || []).slice(0, 4);
+  c.pendingQ = { id: m.id, questions: qs };
+  const d = el('div', 'ask');
+  d.id = 'ask-' + c.chatId + '-' + m.id;
+  d.append(el('div', 'ahead', '💬 Claude 想问你' + (qs.length > 1 ? `（${qs.length} 个问题）` : '')));
+  const body = el('div', 'qbody');
+  const state = qs.map(() => ({ picked: new Set(), other: '' }));
+  const submitBtn = el('button', 'btn primary', '提交');
+  const answered = (i) => state[i].picked.size > 0 || state[i].other.trim();
+  const refresh = () => { submitBtn.disabled = !qs.every((_, i) => answered(i)); };
+  const answerOf = (i) => [...[...state[i].picked].map((k) => qs[i].options[k].label), ...(state[i].other.trim() ? [state[i].other.trim()] : [])].join(', ');
+  const doSubmit = () => {
+    if (!qs.every((_, i) => answered(i))) return;
+    const answers = {};
+    qs.forEach((q, i) => { answers[q.question] = answerOf(i); });
+    send({ type: 'answer', chatId: c.chatId, id: m.id, answers });
+    submitBtn.disabled = true;
+  };
+  qs.forEach((q, i) => {
+    const box = el('div', 'aq');
+    const title = el('div', 'aqt');
+    if (q.header) title.append(el('span', 'chip', q.header));
+    title.append(el('span', null, q.question + (q.multiSelect ? '（可多选）' : '')));
+    box.append(title);
+    const opts = el('div', 'aopts');
+    (q.options || []).forEach((o, k) => {
+      const b = el('button', 'aopt');
+      b.append(el('b', null, o.label));
+      if (o.description) b.append(el('span', null, o.description));
+      if (o.preview) { const pv = el('pre', 'apv', String(o.preview).slice(0, 2000)); b.append(pv); }
+      b.onclick = () => {
+        const p = state[i].picked;
+        if (q.multiSelect) { p.has(k) ? p.delete(k) : p.add(k); }
+        else { p.clear(); p.add(k); state[i].other = ''; other.value = ''; }
+        for (const [j, x] of [...opts.children].entries()) x.classList.toggle('on', p.has(j));
+        refresh();
+        // 只有一个单选题：点了就直接提交
+        if (qs.length === 1 && !q.multiSelect) doSubmit();
+      };
+      opts.append(b);
+    });
+    const other = el('input', 'inp aother');
+    other.placeholder = q.multiSelect ? '其他（可补充自己的答案）' : '其他：自己写答案，回车提交';
+    other.oninput = () => {
+      state[i].other = other.value;
+      if (!q.multiSelect && other.value.trim()) { state[i].picked.clear(); for (const x of opts.children) x.classList.remove('on'); }
+      refresh();
+    };
+    other.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doSubmit(); } };
+    box.append(opts, other);
+    body.append(box);
+  });
+  const btns = el('div', 'btns');
+  const skip = el('button', 'btn', '跳过');
+  skip.onclick = () => send({ type: 'answer', chatId: c.chatId, id: m.id, answers: {} });
+  submitBtn.onclick = doSubmit;
+  btns.append(submitBtn, skip, el('span', 'ahint', qs.length === 1 ? '也可以直接在下面的输入框里打字回答' : ''));
+  body.append(btns);
+  d.append(body);
+  refresh();
+  target.append(d);
+  if (c === current) renderComposer();
+}
 // 撞到限额后的“自动继续”提示卡片
 function resumeRemaining(r) { return r.resumeAt - (Date.now() - S.clockOffset); }
 function resumeLine(r) {
@@ -1155,9 +1241,14 @@ function handleRun(c, m) {
       c.stats = m; if (m.contextUsed) c.contextUsed = m.contextUsed; break;
     case 'permission_request':
       addPermission(c, t(), m); t().append(c.liveStat); break;
+    case 'question_request':
+      addQuestion(c, t(), m); t().append(c.liveStat); break;
     case 'permission_resolved': {
       const d = document.getElementById('perm-' + c.chatId + '-' + m.id);
       if (d) d.querySelector('.btns')?.replaceWith(el('div', 'res', m.label));
+      const q = document.getElementById('ask-' + c.chatId + '-' + m.id);
+      if (q) { q.classList.add('answered'); q.querySelector('.qbody')?.replaceWith(el('div', 'res', m.label)); }
+      if (c.pendingQ?.id === m.id) { c.pendingQ = null; if (c === current) renderComposer(); }
       break;
     }
     case 'result': {
@@ -1240,6 +1331,14 @@ function attachFiles(files) {
 function submit() {
   const c = current;
   if (!c) return;
+  // Claude 正在等你回答问题：输入框里写的话直接当作答案
+  if (c.running && c.pendingQ && $('input').value.trim()) {
+    const qs = c.pendingQ.questions;
+    if (qs.length !== 1) { toast('有好几个问题，请在上面的问题卡片里逐个回答', true); return; }
+    send({ type: 'answer', chatId: c.chatId, id: c.pendingQ.id, answers: { [qs[0].question]: $('input').value.trim() } });
+    $('input').value = ''; autoGrow();
+    return;
+  }
   if (c.running) { send({ type: 'interrupt', chatId: c.chatId }); return; }
   if (uploadsBusy()) { toast('文件还在上传，稍等一下'); return; }
   let text = $('input').value.trim();
@@ -1252,7 +1351,7 @@ function submit() {
   $('input').value = ''; autoGrow();
 }
 $('sendBtn').onclick = submit;
-$('input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!current?.running) submit(); } });
+$('input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!current?.running || current.pendingQ) submit(); } });
 function autoGrow() { const i = $('input'); i.style.height = 'auto'; i.style.height = Math.min(i.scrollHeight, 260) + 'px'; }
 $('input').addEventListener('input', autoGrow);
 $('attachBtn').onclick = () => $('fileInput').click();
