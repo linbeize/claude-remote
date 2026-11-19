@@ -23,7 +23,7 @@ const PASSIVE_MAX = 4;              // 同一条消息最多被动回复几次�
 const PAIR_TTL = 10 * 60_000;       // 配对码 10 分钟有效
 const MAX_ATTACH = 50 * 1024 * 1024;
 const MODEL_ALIAS = { default: '', 默认: '', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-2' };
-const MODE_NAMES = { default: '标准', acceptEdits: '自动改文件', plan: '只做计划', bypassPermissions: '完全权限' };
+const MODE_NAMES = { default: '标准', acceptEdits: '自动改文件', plan: '只做计划', bypassPermissions: '完全权限', bypassAll: '完全权限（安全检查也不问）' };
 
 let host = null;     // server.mjs 提供：startRun / interrupt / resolvePermission / onRunEvent / workspaces / WORKDIR / MODELS / MODES / isRunning
 let cfg = null;

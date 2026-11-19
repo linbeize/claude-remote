@@ -481,6 +481,7 @@ body.tab-files #chat, body.tab-files #composer { display: none; }
                   <option value="acceptEdits">自动接受编辑</option>
                   <option value="plan">计划模式（只规划不执行）</option>
                   <option value="bypassPermissions">完全权限（不再询问）</option>
+                  <option value="bypassAll">完全权限（安全检查也不问）</option>
                 </select>
               </label>
               <div class="grow"></div>
@@ -606,7 +607,7 @@ function toast(msg, err) {
 const dlUrl = (p) => '/api/download?path=' + encodeURIComponent(p);
 
 // ================= 状态 =================
-const MODE_LABEL = { default: '标准模式', acceptEdits: '自动接受编辑', plan: '计划模式', bypassPermissions: '完全权限' };
+const MODE_LABEL = { default: '标准模式', acceptEdits: '自动接受编辑', plan: '计划模式', bypassPermissions: '完全权限', bypassAll: '完全权限+' };
 const MODEL_LABEL = { '': '默认模型', 'claude-opus-5-5': 'Claude Opus 5.5', 'claude-sonnet-5-5': 'Claude Sonnet 5.5', 'claude-haiku-5-5': 'Claude Haiku 5.5', 'claude-fable-5-2': 'Claude Fable 5.2' };
 const S = {
   workspaces: [], defaultWs: '', sessions: [], discovered: [],
@@ -1370,7 +1371,7 @@ box.addEventListener('drop', (e) => { e.preventDefault(); box.classList.remove('
 function syncPickers() {
   $('modeLabel').textContent = MODE_LABEL[S.mode];
   $('modePick').title = '权限模式：' + MODE_LABEL[S.mode];
-  $('modePick').classList.toggle('danger', S.mode === 'bypassPermissions');
+  $('modePick').classList.toggle('danger', S.mode === 'bypassPermissions' || S.mode === 'bypassAll');
   $('modelLabel').textContent = MODEL_LABEL[S.model];
   $('modelPick').title = '模型：' + MODEL_LABEL[S.model];
 }
@@ -1381,6 +1382,7 @@ narrow.addEventListener('change', setPlaceholder); setPlaceholder();
 $('modeSel').onchange = (e) => {
   const v = e.target.value;
   if (v === 'bypassPermissions' && !confirm('完全权限模式下，Claude 运行命令、改文件都不会再询问你。确定要切换吗？')) { e.target.value = S.mode; return; }
+  if (v === 'bypassAll' && !confirm('这个模式连 Claude Code 自带的安全检查也自动放行（比如它判断“可能有危险的 rm 删除”时）。误删文件时不会再有最后一道确认。确定要切换吗？')) { e.target.value = S.mode; return; }
   S.mode = v; store.set('mode', v); syncPickers(); renderTop();
 };
 $('modelSel').onchange = (e) => { S.model = e.target.value; store.set('model', S.model); syncPickers(); };
@@ -1756,6 +1758,7 @@ function qqRender() {
     p.append(qqRow('工作区', 'QQ 上的对话在哪个目录里运行，收到的文件存在它的 uploads 文件夹。默认是专用的 qqbot 文件夹；换工作区后，QQ 上会开始新会话', qqSelect((S.workspaces.includes(qq.cwd) ? S.workspaces : [qq.cwd, ...S.workspaces]).map((w) => [w, w]), qq.cwd, (v) => qqDo({ op: 'settings', cwd: v }, '已保存'))));
     p.append(qqRow('权限', 'QQ 发起的对话用什么权限模式。不是“完全权限”时，需要确认的操作会在 QQ 里问你', qqSelect([...$('modeSel').options].map((o) => [o.value, o.textContent]), qq.mode, (v) => {
       if (v === 'bypassPermissions' && !confirm('完全权限下，Claude 执行命令、改文件都不再询问。确定用于 QQ 吗？')) return qqRender();
+      if (v === 'bypassAll' && !confirm('这个模式连 Claude Code 自带的安全检查也自动放行，误删文件时不会再有最后一道确认。确定用于 QQ 吗？')) return qqRender();
       qqDo({ op: 'settings', mode: v }, '已保存');
     })));
     p.append(qqRow('模型', '默认模型；每个 QQ 会话也可以用 /model 单独切换', qqSelect([...$('modelSel').options].map((o) => [o.value, o.textContent]), qq.model, (v) => qqDo({ op: 'settings', model: v }, '已保存'))));

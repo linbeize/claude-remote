@@ -511,7 +511,10 @@ function insideWorkspace(p) {
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
 const MODELS = ['', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'];
-const MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+// bypassAll：完全权限，并且 Claude Code 在完全权限下仍然要问的安全检查（比如“没法排除危险的 rm”）也自动允许。
+// 传给 SDK 时还是 bypassPermissions，只是 canUseTool 里不再转给人确认
+const MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'bypassAll'];
+const NO_AUTO_ALLOW = new Set(['AskUserQuestion', 'ExitPlanMode']); // 这两个是要人回答 / 批准的，不是安全检查
 
 // ---------- 撞到用量限额后自动继续 ----------
 // 记在 data/resume.json 里，服务重启后照样会按时继续
@@ -604,6 +607,10 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto, origi
 
   // 每次工具调用都会走这里，转发到网页上让人点允许/拒绝
   const canUseTool = (toolName, input, opts) => new Promise((resolve) => {
+    if (run.mode === 'bypassAll' && !NO_AUTO_ALLOW.has(toolName)) {
+      console.log(`[权限] 自动允许 ${toolName}${opts.decisionReason ? '（' + String(opts.decisionReason).slice(0, 200) + '）' : ''}`);
+      return resolve({ behavior: 'allow', updatedInput: input });
+    }
     const id = String(++permSeq);
     const done = (result, label) => {
       if (!run.pending.has(id)) return;
@@ -636,8 +643,8 @@ async function startRun(chatId, { sessionId, text, cwd, model, mode, auto, origi
         model: model || MODEL,
         includePartialMessages: true,
         thinking: { type: 'adaptive', display: 'summarized' }, // 让网页能显示思考摘要
-        permissionMode: mode || 'default',
-        allowDangerouslySkipPermissions: mode === 'bypassPermissions',
+        permissionMode: mode === 'bypassAll' ? 'bypassPermissions' : (mode || 'default'),
+        allowDangerouslySkipPermissions: mode === 'bypassPermissions' || mode === 'bypassAll',
         settingSources: ['user', 'project', 'local'],
         canUseTool,
         abortController: abort,
